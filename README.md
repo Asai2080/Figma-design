@@ -40,6 +40,10 @@ AI UI Asset Generator 是一个运行在 Figma 内的 AI UI 设计稿生成与�
 
 需要 Node.js 20+。
 
+更完整的使用流程、功能说明和常见问题见：
+
+- [使用说明与功能说明](docs/使用说明与功能说明.md)
+
 1. 安装依赖：
 
 ```bash
@@ -176,4 +180,3 @@ npm run api
 - 切图资产批量命名和管理
 - 图片/icon 转 SVG 的可编辑化能力
 - 结构化生成 Figma 可编辑图层
-
