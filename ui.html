@@ -1,0 +1,3972 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Image Generator</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f7fb;
+        --panel: #ffffff;
+        --ink: #20232a;
+        --muted: #8a8f9c;
+        --line: #e7e8ef;
+        --line-strong: #d8d9e3;
+        --accent: #111318;
+        --accent-soft: #f1f2f4;
+        --accent-weak: #5b606a;
+        --tile: #d9d9d9;
+        --danger: #b34231;
+        --shadow: 0 8px 22px rgba(30, 35, 55, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        width: 980px;
+        height: 700px;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 12px;
+      }
+
+      button,
+      textarea,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-rows: 52px 1fr;
+        width: 980px;
+        height: 700px;
+        overflow: hidden;
+        background: var(--panel);
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 22px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 18px;
+        font-weight: 760;
+        letter-spacing: 0;
+      }
+
+      .brand-mark {
+        position: relative;
+        width: 16px;
+        height: 16px;
+      }
+
+      .brand-mark::before,
+      .brand-mark::after {
+        position: absolute;
+        content: "";
+        inset: 4px;
+        border-radius: 3px;
+        background: var(--accent);
+        transform: rotate(45deg);
+      }
+
+      .brand-mark::after {
+        inset: 8px 0 8px 0;
+        background: var(--accent-weak);
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: 348px 1fr;
+        min-height: 0;
+        height: 648px;
+        overflow: hidden;
+      }
+
+      .sidebar {
+        position: relative;
+        min-height: 0;
+        overflow: hidden;
+        border-right: 1px solid var(--line);
+        background: #ffffff;
+      }
+
+      .sidebar::after {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        height: 92px;
+        content: "";
+        pointer-events: none;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0), #ffffff 42%);
+        z-index: 2;
+      }
+
+      .tabs {
+        position: relative;
+        z-index: 5;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0;
+        margin: 14px 22px 0;
+        padding: 6px;
+        border-radius: 16px;
+        background: #f0f0f2;
+      }
+
+      .tab {
+        height: 42px;
+        border-radius: 12px;
+        color: #6b707a;
+        background: transparent;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .tab.active {
+        color: #111318;
+        background: #ffffff;
+        box-shadow: 0 6px 18px rgba(20, 24, 36, 0.08);
+      }
+
+      .controls {
+        position: relative;
+        z-index: 5;
+        display: flex;
+        flex-direction: column;
+        gap: 13px;
+        padding: 16px 22px 106px;
+      }
+
+      .sidebar.image-mode .controls {
+        gap: 10px;
+        padding-top: 14px;
+      }
+
+      .section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .section.hidden {
+        display: none;
+      }
+
+      .section-title {
+        color: #333741;
+        font-size: 12px;
+        font-weight: 780;
+      }
+
+      .prompt-box {
+        position: relative;
+      }
+
+      .prompt-box.with-reference {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-height: 236px;
+        border: 1px solid var(--line-strong);
+        border-radius: 14px;
+        background: #ffffff;
+        box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.02);
+      }
+
+      .sidebar.image-mode .prompt-box.with-reference {
+        min-height: 210px;
+      }
+
+      .sidebar.image-mode.custom-mode .prompt-box.with-reference {
+        min-height: 196px;
+      }
+
+      textarea {
+        width: 100%;
+        height: 178px;
+        resize: none;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        padding: 11px 12px 28px;
+        color: #555b66;
+        background: #ffffff;
+        line-height: 1.5;
+        box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.02);
+        outline: none;
+      }
+
+      textarea:focus {
+        outline: none;
+        box-shadow: none;
+      }
+
+      .prompt-box.with-reference textarea {
+        order: 2;
+        height: 156px;
+        border: 0;
+        border-radius: 0;
+        padding: 10px 16px 32px;
+        color: #555b66;
+        background: transparent;
+        font-size: 15px;
+        font-weight: 720;
+        box-shadow: none;
+      }
+
+      .sidebar.image-mode .prompt-box.with-reference textarea {
+        height: 126px;
+        font-size: 14px;
+      }
+
+      .sidebar.image-mode.custom-mode .prompt-box.with-reference textarea {
+        height: 112px;
+      }
+
+      .prompt-box.with-reference textarea::placeholder {
+        color: #9aa0ab;
+        opacity: 1;
+      }
+
+      .reference-strip {
+        display: block;
+        position: relative;
+        padding: 0 10px 10px;
+        z-index: 2;
+      }
+
+      .prompt-box.with-reference .reference-strip {
+        order: 1;
+        padding: 10px 12px 0;
+      }
+
+      .reference-strip.hidden {
+        display: none;
+      }
+
+      .reference-drop {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        min-height: 44px;
+        border: 1px dashed #cfd3dc;
+        border-radius: 12px;
+        padding: 6px;
+        color: #6d7280;
+        background: #f8f9fb;
+        font-weight: 760;
+        cursor: pointer;
+      }
+
+      .reference-drop.empty {
+        display: none;
+      }
+
+      .prompt-box.with-reference .reference-drop {
+        width: 100%;
+        min-height: 42px;
+        border-color: #d7dbe3;
+        border-radius: 12px;
+        color: #6d7280;
+        background: #f8f9fb;
+      }
+
+      .reference-drop.has-image {
+        display: inline-flex;
+        width: 228px;
+        min-height: 0;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        box-shadow: none;
+      }
+
+      .prompt-box.with-reference .reference-drop.has-image {
+        width: 228px;
+        min-height: 0;
+        border: 0;
+        border-radius: 0;
+        padding: 0;
+        background: transparent;
+        box-shadow: none;
+      }
+
+      .reference-drop input {
+        display: none;
+      }
+
+      .reference-empty {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+        padding: 2px 4px;
+      }
+
+      .reference-empty strong {
+        color: #333741;
+        font-size: 11px;
+        font-weight: 820;
+      }
+
+      .prompt-box.with-reference .reference-empty strong {
+        color: #333741;
+      }
+
+      .reference-empty span {
+        color: #8f95a2;
+        font-size: 9px;
+        font-weight: 680;
+      }
+
+      .prompt-box.with-reference .reference-empty span {
+        color: #8f95a2;
+      }
+
+      .reference-chips {
+        display: none;
+        flex-wrap: wrap;
+        align-content: flex-start;
+        gap: 4px;
+        width: 228px;
+        max-height: 44px;
+        overflow: hidden;
+        transition: none;
+      }
+
+      .reference-drop.has-image .reference-empty {
+        display: none;
+      }
+
+      .reference-drop.has-image .reference-chips {
+        display: flex;
+      }
+
+      .reference-popover {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 12px;
+        display: none;
+        width: 248px;
+        max-height: 164px;
+        padding: 10px;
+        border: 1px solid #e1e4eb;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 18px 34px rgba(20, 24, 36, 0.16);
+        backdrop-filter: blur(10px);
+        z-index: 8;
+      }
+
+      .reference-strip.has-overflow:hover .reference-popover,
+      .reference-strip.has-overflow:focus-within .reference-popover {
+        display: block;
+      }
+
+      .reference-popover-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        max-height: 142px;
+        overflow-y: auto;
+        padding-right: 2px;
+      }
+
+      .reference-popover .reference-chip {
+        max-width: 106px;
+      }
+
+      .reference-chip.more {
+        justify-content: center;
+        color: #505766;
+        font-size: 10px;
+        font-weight: 780;
+        background: #f5f7fb;
+      }
+
+      .reference-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        max-width: 112px;
+        height: 20px;
+        padding: 2px 4px 2px 2px;
+        border: 1px solid #e1e4eb;
+        border-radius: 999px;
+        background: #ffffff;
+        box-shadow: 0 3px 8px rgba(20, 24, 36, 0.05);
+      }
+
+      .reference-preview {
+        width: 16px;
+        height: 16px;
+        flex: 0 0 16px;
+        object-fit: cover;
+        border-radius: 999px;
+        background: #eceef3;
+      }
+
+      .reference-info {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .reference-info strong {
+        display: block;
+        overflow: hidden;
+        color: #252933;
+        font-size: 9px;
+        font-weight: 780;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .reference-clear {
+        display: grid;
+        place-items: center;
+        width: 14px;
+        height: 14px;
+        flex: 0 0 14px;
+        border-radius: 999px;
+        color: #6b707a;
+        background: #f1f2f4;
+        font-size: 11px;
+        line-height: 1;
+      }
+
+      .reference-actions {
+        display: none;
+      }
+
+      .char-count {
+        position: absolute;
+        right: 12px;
+        bottom: 8px;
+        color: #b2b5bd;
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .prompt-box.with-reference .char-count {
+        color: #b2b5bd;
+      }
+
+      .ratio-grid,
+      .count-grid {
+        display: grid;
+        gap: 7px;
+      }
+
+      .ratio-grid {
+        grid-template-columns: repeat(6, 1fr);
+      }
+
+      .count-grid {
+        grid-template-columns: repeat(4, 1fr);
+      }
+
+      .choice {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        padding: 0;
+        background: transparent;
+      }
+
+      .choice-main {
+        display: grid;
+        place-items: center;
+        width: 100%;
+        min-height: 31px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        color: #4e5663;
+        background: #ffffff;
+        font-weight: 760;
+      }
+
+      .sidebar.image-mode.custom-mode .choice-main {
+        min-height: 28px;
+      }
+
+      .choice.active .choice-main {
+        border-color: var(--accent-weak);
+        color: var(--accent);
+        background: #fcfbff;
+        box-shadow: inset 0 0 0 1px rgba(17, 19, 24, 0.18);
+      }
+
+      .choice-label {
+        max-width: 100%;
+        overflow: hidden;
+        color: #8f95a2;
+        font-size: 10px;
+        font-weight: 650;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .size-card {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 11px 12px;
+        background: #ffffff;
+      }
+
+      .sidebar.image-mode.custom-mode .size-card {
+        gap: 6px;
+        padding: 8px 10px;
+      }
+
+      .size-card.hidden {
+        display: none;
+      }
+
+      .size-title {
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .sidebar.image-mode.custom-mode .size-title {
+        font-size: 11px;
+      }
+
+      .size-row {
+        display: grid;
+        grid-template-columns: 1fr 18px 1fr 62px;
+        gap: 7px;
+        align-items: end;
+      }
+
+      .size-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .size-field label {
+        color: #8f95a2;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .size-field input,
+      select {
+        width: 100%;
+        height: 30px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 0 9px;
+        color: #4f5664;
+        background: #ffffff;
+        font-weight: 650;
+      }
+
+      .sidebar.image-mode.custom-mode .size-field input,
+      .sidebar.image-mode.custom-mode select {
+        height: 28px;
+      }
+
+      .link-icon {
+        display: grid;
+        place-items: center;
+        height: 30px;
+        color: #8f95a2;
+        font-weight: 760;
+      }
+
+      .hint {
+        color: #a1a6b0;
+        font-size: 10px;
+        font-weight: 650;
+      }
+
+      .sidebar.image-mode.custom-mode .hint {
+        font-size: 9px;
+      }
+
+      .generate {
+        position: absolute;
+        right: 22px;
+        bottom: 18px;
+        left: 76px;
+        z-index: 3;
+        width: auto;
+        height: 42px;
+        border-radius: 7px;
+        color: #ffffff;
+        background: var(--accent);
+        font-size: 14px;
+        font-weight: 820;
+        box-shadow: var(--shadow);
+      }
+
+      .quota {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: #9aa0ab;
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .quota a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .main {
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+        background: #ffffff;
+      }
+
+      .content {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        height: 648px;
+        overflow: hidden;
+        padding: 24px 24px 26px;
+      }
+
+      .result-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .result-title {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        font-weight: 820;
+      }
+
+      .result-title span {
+        color: #9aa0ab;
+        font-weight: 720;
+      }
+
+      .result-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .text-action {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 30px;
+        padding: 0 9px;
+        border-radius: 7px;
+        color: var(--accent);
+        background: transparent;
+        font-weight: 750;
+      }
+
+      .place-action {
+        color: #ffffff;
+        background: var(--accent);
+      }
+
+      .result-view {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .result-card {
+        position: relative;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        width: 100%;
+        flex: 1;
+        min-height: 0;
+        padding: 16px 56px 18px;
+        border-radius: 18px;
+        border: 1px solid #eef0f4;
+        background: #fbfbfc;
+      }
+
+      .result-card.slice-mode {
+        cursor: crosshair;
+      }
+
+      .result-frame {
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        padding: 18px 18px 22px;
+        background: transparent;
+        overflow: auto;
+      }
+
+      .result-canvas {
+        position: relative;
+        display: inline-block;
+        flex: 0 0 auto;
+      }
+
+      .result-card img {
+        display: block;
+        width: auto;
+        height: auto;
+        max-width: 100%;
+        max-height: 100%;
+        border-radius: 18px;
+        background: transparent;
+        filter: drop-shadow(0 18px 28px rgba(20, 24, 36, 0.16));
+      }
+
+      .slice-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 4;
+        pointer-events: none;
+      }
+
+      .result-card.slice-mode .slice-layer {
+        pointer-events: auto;
+      }
+
+      .slice-cutout {
+        position: absolute;
+        border-radius: 5px;
+        overflow: hidden;
+        background:
+          linear-gradient(45deg, #eceef3 25%, transparent 25%),
+          linear-gradient(-45deg, #eceef3 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #eceef3 75%),
+          linear-gradient(-45deg, transparent 75%, #eceef3 75%);
+        background-color: rgba(255, 255, 255, 0.92);
+        background-size: cover;
+        background-position: center;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .slice-cutout::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: rgba(255, 255, 255, 0.12);
+        box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.18);
+        pointer-events: none;
+      }
+
+      .slice-box {
+        position: absolute;
+        border: 1.5px solid #111318;
+        border-radius: 5px;
+        background: rgba(17, 19, 24, 0.08);
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8) inset;
+      }
+
+      .slice-box.active {
+        border-color: #1778ff;
+        background: rgba(23, 120, 255, 0.12);
+      }
+
+      .slice-box.active {
+        cursor: move;
+      }
+
+      .slice-handle {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        border: 2px solid #1778ff;
+        border-radius: 50%;
+        background: #ffffff;
+        box-shadow: 0 2px 8px rgba(23, 120, 255, 0.22);
+      }
+
+      .slice-handle[data-slice-handle="nw"],
+      .slice-handle[data-slice-handle="se"] {
+        cursor: nwse-resize;
+      }
+
+      .slice-handle[data-slice-handle="ne"],
+      .slice-handle[data-slice-handle="sw"] {
+        cursor: nesw-resize;
+      }
+
+      .slice-handle[data-slice-handle="n"],
+      .slice-handle[data-slice-handle="s"] {
+        cursor: ns-resize;
+      }
+
+      .slice-handle[data-slice-handle="e"],
+      .slice-handle[data-slice-handle="w"] {
+        cursor: ew-resize;
+      }
+
+      .slice-handle[data-slice-handle="nw"] {
+        top: -6px;
+        left: -6px;
+      }
+
+      .slice-handle[data-slice-handle="n"] {
+        top: -6px;
+        left: calc(50% - 5px);
+      }
+
+      .slice-handle[data-slice-handle="ne"] {
+        top: -6px;
+        right: -6px;
+      }
+
+      .slice-handle[data-slice-handle="e"] {
+        top: calc(50% - 5px);
+        right: -6px;
+      }
+
+      .slice-handle[data-slice-handle="se"] {
+        right: -6px;
+        bottom: -6px;
+      }
+
+      .slice-handle[data-slice-handle="s"] {
+        bottom: -6px;
+        left: calc(50% - 5px);
+      }
+
+      .slice-handle[data-slice-handle="sw"] {
+        bottom: -6px;
+        left: -6px;
+      }
+
+      .slice-handle[data-slice-handle="w"] {
+        top: calc(50% - 5px);
+        left: -6px;
+      }
+
+      .slice-label {
+        position: absolute;
+        top: -22px;
+        left: 0;
+        display: inline-flex;
+        align-items: center;
+        height: 18px;
+        padding: 0 6px;
+        border-radius: 5px;
+        color: #ffffff;
+        background: #111318;
+        font-size: 10px;
+        font-weight: 780;
+        white-space: nowrap;
+      }
+
+      .slice-draft {
+        position: absolute;
+        border: 1.5px dashed #1778ff;
+        border-radius: 5px;
+        background: rgba(23, 120, 255, 0.1);
+      }
+
+      .slice-mode-toggle.active {
+        color: #ffffff;
+        background: #111318;
+      }
+
+      .download {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 7px;
+        color: #68707d;
+        background: rgba(255, 255, 255, 0.88);
+        font-size: 18px;
+        font-weight: 800;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      }
+
+      .carousel-nav {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: #ffffff;
+        appearance: none;
+        color: #252933;
+        font-size: 22px;
+        font-weight: 700;
+        box-shadow: 0 12px 24px rgba(20, 24, 36, 0.12);
+        cursor: pointer;
+      }
+
+      .carousel-nav.prev {
+        position: absolute;
+        top: 50%;
+        left: 10px;
+        transform: translateY(-50%);
+      }
+
+      .carousel-nav.next {
+        position: absolute;
+        top: 50%;
+        right: 10px;
+        transform: translateY(-50%);
+      }
+
+      .carousel-nav:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      .result-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        height: 100%;
+        min-height: 350px;
+        color: #6d7280;
+        background: transparent;
+        font-size: 13px;
+        font-weight: 760;
+        text-align: center;
+        line-height: 1.5;
+      }
+
+      .loading-preview {
+        position: relative;
+        width: min(320px, 76%);
+        height: 220px;
+        overflow: hidden;
+        border-radius: 22px;
+        background:
+          linear-gradient(110deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.88) 45%, rgba(255, 255, 255, 0) 72%) -180px 0 / 180px 100% no-repeat,
+          #f0f1f4;
+        box-shadow: 0 22px 44px rgba(20, 24, 36, 0.14);
+        animation: shimmer 1.35s ease-in-out infinite;
+      }
+
+      .loading-preview::before,
+      .loading-preview::after {
+        content: "";
+        position: absolute;
+        border-radius: 999px;
+        background: #dfe2e8;
+      }
+
+      .loading-preview::before {
+        left: 34px;
+        top: 48px;
+        width: 148px;
+        height: 18px;
+        box-shadow:
+          0 36px 0 #e7e9ee,
+          0 84px 0 #d6d9e0;
+      }
+
+      .loading-preview::after {
+        right: 44px;
+        top: 72px;
+        width: 86px;
+        height: 86px;
+        background: #d6d9e0;
+      }
+
+      .loading-label {
+        color: #262a33;
+        font-size: 15px;
+        font-weight: 850;
+      }
+
+      .loading-note {
+        max-width: 360px;
+        color: #8d94a1;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .result-error {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        height: 100%;
+        min-height: 350px;
+        padding: 24px;
+        border: 1px solid #eceef3;
+        border-radius: 14px;
+        color: #6d7280;
+        background: #fbfbfc;
+        text-align: center;
+      }
+
+      .result-error strong {
+        color: #252933;
+        font-size: 16px;
+        font-weight: 860;
+      }
+
+      .result-error span {
+        max-width: 420px;
+        color: #8d94a1;
+        font-size: 12px;
+        font-weight: 680;
+        line-height: 1.55;
+      }
+
+      @keyframes shimmer {
+        0% {
+          background-position: -180px 0, 0 0;
+        }
+        100% {
+          background-position: calc(100% + 180px) 0, 0 0;
+        }
+      }
+
+      .cut-section {
+        display: none;
+        min-height: 126px;
+        padding-top: 2px;
+      }
+
+      .cut-section.open {
+        display: block;
+      }
+
+      .cut-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+
+      .cut-head-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .cut-title {
+        margin: 0;
+        color: #20232a;
+        font-size: 14px;
+        font-weight: 860;
+      }
+
+      .cut-help {
+        color: #8a8f9c;
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .cut-batch {
+        height: 24px;
+        padding: 0 9px;
+        border: 1px solid #e0e3ea;
+        border-radius: 7px;
+        color: #111318;
+        background: #ffffff;
+        font-size: 10px;
+        font-weight: 780;
+      }
+
+      .cut-batch:disabled {
+        color: #a4a9b5;
+        cursor: not-allowed;
+      }
+
+      .cut-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        max-height: 96px;
+        overflow: auto;
+        padding-right: 2px;
+      }
+
+      .cut-empty {
+        grid-column: 1 / -1;
+        display: grid;
+        place-items: center;
+        min-height: 76px;
+        border: 1px dashed #d9dce5;
+        border-radius: 8px;
+        color: #8a8f9c;
+        background: #fbfbfc;
+        font-size: 11px;
+        font-weight: 680;
+      }
+
+      .cut-item {
+        display: grid;
+        grid-template-columns: 42px 1fr auto auto;
+        gap: 8px;
+        align-items: center;
+        min-width: 0;
+        padding: 6px;
+        border: 1px solid #e7e8ef;
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .cut-item.active {
+        border-color: #111318;
+        box-shadow: inset 0 0 0 1px #111318;
+      }
+
+      .cut-thumb {
+        width: 42px;
+        height: 42px;
+        object-fit: cover;
+        border-radius: 6px;
+        background:
+          linear-gradient(45deg, #eceef3 25%, transparent 25%),
+          linear-gradient(-45deg, #eceef3 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #eceef3 75%),
+          linear-gradient(-45deg, transparent 75%, #eceef3 75%);
+        background-color: #ffffff;
+        background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+        background-size: 12px 12px;
+      }
+
+      .cut-meta {
+        min-width: 0;
+      }
+
+      .cut-name {
+        display: block;
+        overflow: hidden;
+        color: #20232a;
+        font-size: 11px;
+        font-weight: 780;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .cut-size {
+        color: #8a8f9c;
+        font-size: 10px;
+        font-weight: 650;
+      }
+
+      .cut-remove {
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        color: #6b707a;
+        background: #f4f5f7;
+        font-size: 16px;
+      }
+
+      .cut-transparent {
+        display: grid;
+        place-items: center;
+        min-width: 44px;
+        height: 24px;
+        padding: 0 8px;
+        border-radius: 6px;
+        color: #111318;
+        background: #f4f5f7;
+        font-size: 10px;
+        font-weight: 760;
+      }
+
+      .cut-transparent.done {
+        color: #1d7a46;
+        background: #eaf7ef;
+      }
+
+      .status {
+        position: absolute;
+        right: 22px;
+        bottom: 66px;
+        left: 22px;
+        z-index: 3;
+        min-height: 18px;
+        color: var(--muted);
+        line-height: 1.45;
+        font-size: 11px;
+        font-weight: 650;
+        pointer-events: none;
+      }
+
+      .status.error {
+        color: var(--danger);
+      }
+
+      .settings-trigger {
+        position: absolute;
+        left: 22px;
+        bottom: 18px;
+        display: grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        color: #111318;
+        background: #ffffff;
+        font-size: 22px;
+        font-weight: 820;
+        box-shadow: 0 10px 22px rgba(20, 24, 36, 0.08);
+        z-index: 6;
+      }
+
+      .settings-panel {
+        position: absolute;
+        right: 18px;
+        bottom: 18px;
+        left: 18px;
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #ffffff;
+        box-shadow: 0 18px 44px rgba(20, 24, 36, 0.18);
+        z-index: 20;
+      }
+
+      .settings-panel.open {
+        display: flex;
+      }
+
+      .settings-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+        font-size: 14px;
+        font-weight: 860;
+      }
+
+      .settings-close {
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
+        color: #6b707a;
+        background: #f4f5f7;
+        font-size: 18px;
+      }
+
+      .provider-row {
+        display: grid;
+        grid-template-columns: 36px 1fr auto;
+        gap: 12px;
+        align-items: center;
+        padding: 15px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .provider-row:last-child {
+        border-bottom: 0;
+      }
+
+      .provider-icon {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        color: #111318;
+        background: #f4f5f7;
+        font-size: 13px;
+        font-weight: 900;
+      }
+
+      .provider-name {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      .provider-name strong {
+        color: #171a21;
+        font-size: 13px;
+      }
+
+      .provider-name span {
+        overflow: hidden;
+        color: #8a8f9c;
+        font-size: 11px;
+        font-weight: 650;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .provider-action {
+        min-width: 78px;
+        height: 32px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        color: #333741;
+        background: #f8f9fb;
+        font-weight: 760;
+      }
+
+      .provider-select {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        padding: 12px 16px 4px;
+      }
+
+      .provider-option {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        color: #6b707a;
+        background: #ffffff;
+        text-align: left;
+      }
+
+      .provider-option strong {
+        color: #20232a;
+        font-size: 12px;
+      }
+
+      .provider-option span {
+        overflow: hidden;
+        font-size: 10px;
+        font-weight: 680;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .provider-option.active {
+        border-color: #111318;
+        box-shadow: inset 0 0 0 1px #111318;
+      }
+
+      .config-form {
+        display: none;
+        flex-direction: column;
+        gap: 10px;
+        padding: 14px 16px 16px;
+        border-top: 1px solid var(--line);
+        background: #fbfbfc;
+      }
+
+      .config-form.open {
+        display: flex;
+      }
+
+      .config-field {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .config-field label {
+        color: #6b707a;
+        font-size: 11px;
+        font-weight: 760;
+      }
+
+      .config-field input {
+        height: 34px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0 10px;
+        color: #333741;
+        background: #ffffff;
+        font-weight: 650;
+      }
+
+      .config-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .config-save,
+      .config-test {
+        height: 34px;
+        border-radius: 8px;
+        font-weight: 800;
+      }
+
+      .config-save {
+        color: #ffffff;
+        background: #111318;
+      }
+
+      .config-test {
+        border: 1px solid var(--line);
+        color: #333741;
+        background: #ffffff;
+      }
+
+      .config-status {
+        min-height: 17px;
+        color: #8a8f9c;
+        font-size: 11px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>AI Image Generator</span>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <aside class="sidebar">
+          <nav class="tabs" aria-label="生成模式">
+            <button class="tab active" type="button" data-mode="text-to-image">
+              <span>文生图</span>
+            </button>
+            <button class="tab" type="button" data-mode="image-to-image">
+              <span>图生图</span>
+            </button>
+          </nav>
+
+          <div class="controls">
+            <section class="section">
+              <div class="section-title">1. 输入描述词</div>
+              <div class="prompt-box">
+                <textarea id="prompt" maxlength="1000"></textarea>
+                <div id="charCount" class="char-count">0 / 1000</div>
+                <div id="referenceSection" class="reference-strip hidden">
+                  <div id="referenceDrop" class="reference-drop">
+                    <input id="referenceImage" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+                    <span id="uploadText" class="reference-empty">
+                      <strong>粘贴图片或点击上传</strong>
+                      <span>支持一次上传多张，也支持连续粘贴多张参考图</span>
+                    </span>
+                    <div id="referenceChips" class="reference-chips"></div>
+                  </div>
+                  <div id="referencePopover" class="reference-popover">
+                    <div id="referencePopoverGrid" class="reference-popover-grid"></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="section">
+              <div class="section-title">2. 选片比例</div>
+              <div class="ratio-grid">
+                <button class="choice" type="button" data-ratio="1:1"><span class="choice-main">1:1</span><span class="choice-label">正方形</span></button>
+                <button class="choice" type="button" data-ratio="16:9"><span class="choice-main">16:9</span><span class="choice-label">横屏</span></button>
+                <button class="choice" type="button" data-ratio="4:3"><span class="choice-main">4:3</span><span class="choice-label">传统屏</span></button>
+                <button class="choice" type="button" data-ratio="3:4"><span class="choice-main">3:4</span><span class="choice-label">竖屏</span></button>
+                <button class="choice active" type="button" data-ratio="9:16"><span class="choice-main">9:16</span><span class="choice-label">手机屏</span></button>
+                <button class="choice" type="button" data-ratio="custom"><span class="choice-main">自定义</span><span class="choice-label">自定义比例</span></button>
+              </div>
+            </section>
+
+            <section id="customSizeCard" class="size-card hidden">
+              <div class="size-title">自定义尺寸</div>
+              <div class="size-row">
+                <div class="size-field">
+                  <label for="width">宽度</label>
+                  <input id="width" type="number" min="256" max="4096" value="390" />
+                </div>
+                <div class="link-icon">↔</div>
+                <div class="size-field">
+                  <label for="height">高度</label>
+                  <input id="height" type="number" min="256" max="4096" value="844" />
+                </div>
+                <select id="unit" aria-label="单位">
+                  <option value="px">px</option>
+                </select>
+              </div>
+              <div class="hint">支持 256 - 4096px</div>
+            </section>
+
+            <section class="section">
+              <div class="section-title">3. 图片数量</div>
+              <div class="count-grid">
+                <button class="choice" type="button" data-count="1"><span class="choice-main">1</span></button>
+                <button class="choice" type="button" data-count="2"><span class="choice-main">2</span></button>
+                <button class="choice active" type="button" data-count="4"><span class="choice-main">4</span></button>
+                <button class="choice" type="button" data-count="8"><span class="choice-main">8</span></button>
+              </div>
+            </section>
+
+            <button id="generate" class="generate" type="button">生成设计稿</button>
+            <div id="status" class="status" aria-live="polite"></div>
+          </div>
+
+          <button id="settingsTrigger" class="settings-trigger" type="button" aria-label="打开设置">⋯</button>
+          <section id="settingsPanel" class="settings-panel" aria-label="API 设置">
+            <div class="settings-head">
+              <span>已连接提供商</span>
+              <button id="settingsClose" class="settings-close" type="button" aria-label="关闭设置">×</button>
+            </div>
+            <div class="provider-select" aria-label="选择供应商">
+              <button class="provider-option active" type="button" data-provider="thirdParty">
+                <strong>第三方</strong>
+                <span>gpt-image-2-all</span>
+              </button>
+              <button class="provider-option" type="button" data-provider="openai">
+                <strong>官方 OpenAI</strong>
+                <span>gpt-image-2</span>
+              </button>
+              <button class="provider-option" type="button" data-provider="openrouter">
+                <strong>OpenRouter</strong>
+                <span>gpt-5.4-image-2</span>
+              </button>
+            </div>
+            <div class="provider-row">
+              <div class="provider-icon">API</div>
+              <div class="provider-name">
+                <strong>API 配置</strong>
+                <span>配置供应商地址、模型和 API Key。</span>
+              </div>
+              <button id="apiConfigButton" class="provider-action" type="button">前往设置</button>
+            </div>
+            <form id="apiConfigForm" class="config-form">
+              <div class="config-field">
+                <label for="providerBaseUrl">供应商 Base URL</label>
+                <input id="providerBaseUrl" type="url" value="https://api.openai.com" />
+              </div>
+              <div class="config-field">
+                <label for="apiModel">模型</label>
+                <input id="apiModel" type="text" value="gpt-image-2" />
+              </div>
+              <div class="config-field">
+                <label for="apiKey">OpenAI API Key</label>
+                <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+              </div>
+              <div class="config-actions">
+                <button id="saveApiConfig" class="config-save" type="submit">保存配置</button>
+                <button id="testApiConfig" class="config-test" type="button">测试连接</button>
+              </div>
+              <div id="apiConfigStatus" class="config-status"></div>
+            </form>
+          </section>
+        </aside>
+
+        <section class="main">
+          <div class="content">
+            <div class="result-head">
+              <div class="result-title">
+                <strong>生成结果</strong>
+                <span id="resultCount">共 0 张</span>
+              </div>
+              <div class="result-actions">
+                <button id="sliceMode" class="text-action slice-mode-toggle" type="button" disabled>切图</button>
+                <button id="place" class="text-action place-action" type="button" disabled>放入 Figma</button>
+                <button id="downloadAll" class="text-action" type="button" disabled>↓ 全部下载</button>
+              </div>
+            </div>
+
+            <div id="resultGrid" class="result-view" aria-label="生成结果">
+              <div class="result-card"></div>
+            </div>
+
+            <section id="cutSection" class="cut-section">
+              <div class="cut-head">
+                <h2 class="cut-title">切图资产</h2>
+                <div class="cut-head-actions">
+                  <span id="cutHelp" class="cut-help">选中设计稿后进入切图模式</span>
+                  <button id="exportSlices" class="cut-batch" type="button" disabled>导出切图包</button>
+                  <button id="transparentAll" class="cut-batch" type="button" disabled>全部透明</button>
+                </div>
+              </div>
+              <div id="cutGrid" class="cut-grid"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      const promptInput = document.getElementById("prompt");
+      const charCount = document.getElementById("charCount");
+      const widthInput = document.getElementById("width");
+      const heightInput = document.getElementById("height");
+      const customSizeCard = document.getElementById("customSizeCard");
+      const sidebar = document.querySelector(".sidebar");
+      const promptBox = document.querySelector(".prompt-box");
+      const referenceSection = document.getElementById("referenceSection");
+      const referenceDrop = document.getElementById("referenceDrop");
+      const referenceImageInput = document.getElementById("referenceImage");
+      const uploadText = document.getElementById("uploadText");
+      const referenceChips = document.getElementById("referenceChips");
+      const referencePopover = document.getElementById("referencePopover");
+      const referencePopoverGrid = document.getElementById("referencePopoverGrid");
+      const generateButton = document.getElementById("generate");
+      const sliceModeButton = document.getElementById("sliceMode");
+      const placeButton = document.getElementById("place");
+      const downloadAllButton = document.getElementById("downloadAll");
+      const resultGrid = document.getElementById("resultGrid");
+      const resultCount = document.getElementById("resultCount");
+      const cutSection = document.getElementById("cutSection");
+      const cutGrid = document.getElementById("cutGrid");
+      const cutHelp = document.getElementById("cutHelp");
+      const exportSlicesButton = document.getElementById("exportSlices");
+      const transparentAllButton = document.getElementById("transparentAll");
+      const status = document.getElementById("status");
+      const settingsTrigger = document.getElementById("settingsTrigger");
+      const settingsPanel = document.getElementById("settingsPanel");
+      const settingsClose = document.getElementById("settingsClose");
+      const apiConfigButton = document.getElementById("apiConfigButton");
+      const apiConfigForm = document.getElementById("apiConfigForm");
+      const providerOptionButtons = [...document.querySelectorAll("[data-provider]")];
+      const providerBaseUrlInput = document.getElementById("providerBaseUrl");
+      const apiModelInput = document.getElementById("apiModel");
+      const apiKeyInput = document.getElementById("apiKey");
+      const testApiConfigButton = document.getElementById("testApiConfig");
+      const apiConfigStatus = document.getElementById("apiConfigStatus");
+      let previewFrameObserver = null;
+
+      function safeStorageGet(key) {
+        try {
+          return window.localStorage ? window.localStorage.getItem(key) : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function safeStorageSet(key, value) {
+        try {
+          if (window.localStorage) {
+            window.localStorage.setItem(key, value);
+          }
+        } catch {
+          // Ignore storage failures in embedded/plugin contexts.
+        }
+      }
+
+      function providerStorageKey(provider, field) {
+        return `ai-ui-provider-${provider}-${field}`;
+      }
+
+      const PROXY_BASE_URL = "http://127.0.0.1:8787";
+      const PROVIDER_DEFAULTS = {
+        thirdParty: {
+          label: "第三方",
+          baseUrl: "https://www.ai.banyanteck.com",
+          model: "gpt-image-2-all"
+        },
+        openai: {
+          label: "官方 OpenAI",
+          baseUrl: "https://api.openai.com",
+          model: "gpt-image-2"
+        },
+        openrouter: {
+          label: "OpenRouter",
+          baseUrl: "https://openrouter.ai/api/v1",
+          model: "gpt-5.4-image-2"
+        }
+      };
+      let activeProvider = safeStorageGet("ai-ui-active-provider") || "thirdParty";
+      if (!PROVIDER_DEFAULTS[activeProvider]) {
+        activeProvider = "thirdParty";
+      }
+      let providerBaseUrl = safeStorageGet(providerStorageKey(activeProvider, "base-url")) || PROVIDER_DEFAULTS[activeProvider].baseUrl;
+      let currentManifest = null;
+      let currentMode = "text-to-image";
+      let currentStyle = "";
+      let currentRatio = "9:16";
+      let currentCount = 4;
+      let activeResultIndex = 0;
+      let renderedResultImageId = null;
+      let referenceImages = [];
+      let isSliceMode = false;
+      let activeSliceId = null;
+      let sliceDraft = null;
+      let sliceEdit = null;
+
+      syncProviderFieldsFromStorage();
+      syncCharacterCount();
+      renderEmptyCutModules();
+      updateCustomSizeVisibility();
+      updateModeVisibility();
+      loadApiConfigFromBackend();
+
+      promptInput.addEventListener("input", syncCharacterCount);
+
+      settingsTrigger.addEventListener("click", () => {
+        settingsPanel.classList.add("open");
+      });
+
+      settingsClose.addEventListener("click", () => {
+        settingsPanel.classList.remove("open");
+      });
+
+      apiConfigButton.addEventListener("click", () => {
+        apiConfigForm.classList.toggle("open");
+      });
+
+      providerOptionButtons.forEach((button) => {
+        button.addEventListener("click", async () => {
+          await switchProvider(button.dataset.provider);
+        });
+      });
+
+      apiConfigForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        await saveApiConfig();
+      });
+
+      testApiConfigButton.addEventListener("click", async () => {
+        await testApiConnection();
+      });
+
+      transparentAllButton.addEventListener("click", async () => {
+        await makeAllSlicesTransparent();
+      });
+
+      exportSlicesButton.addEventListener("click", async () => {
+        await exportSlicePackage();
+      });
+
+      document.querySelectorAll(".tab").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          currentMode = button.dataset.mode || "text-to-image";
+          updateModeVisibility();
+        });
+      });
+
+      referenceDrop.addEventListener("click", (event) => {
+        if (event.target.closest("[data-remove-reference]")) {
+          return;
+        }
+        referenceImageInput.click();
+      });
+
+      referenceImageInput.addEventListener("change", async () => {
+        const files = Array.from(referenceImageInput.files || []);
+        if (files.length === 0) {
+          return;
+        }
+        await addReferenceImages(files);
+        referenceImageInput.value = "";
+      });
+
+      referenceChips.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-remove-reference]");
+        if (!button) {
+          return;
+        }
+        event.preventDefault();
+        const index = Number(button.dataset.removeReference);
+        removeReferenceImage(index);
+      });
+
+      referencePopoverGrid.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-remove-reference]");
+        if (!button) {
+          return;
+        }
+        event.preventDefault();
+        const index = Number(button.dataset.removeReference);
+        removeReferenceImage(index);
+      });
+
+      document.addEventListener("paste", async (event) => {
+        if (currentMode !== "image-to-image") {
+          return;
+        }
+        const files = getImagesFromClipboard(event.clipboardData);
+        if (files.length === 0) {
+          return;
+        }
+        event.preventDefault();
+        await addReferenceImages(files);
+      });
+
+      promptBox.addEventListener("dragover", (event) => {
+        if (currentMode !== "image-to-image") {
+          return;
+        }
+        const hasImage = Array.from(event.dataTransfer?.items || []).some(
+          (item) => item.kind === "file" && item.type.startsWith("image/")
+        );
+        if (!hasImage) {
+          return;
+        }
+        event.preventDefault();
+      });
+
+      promptBox.addEventListener("drop", async (event) => {
+        if (currentMode !== "image-to-image") {
+          return;
+        }
+        const files = Array.from(event.dataTransfer?.files || []).filter(
+          (file) => file && file.type && file.type.startsWith("image/")
+        );
+        if (files.length === 0) {
+          return;
+        }
+        event.preventDefault();
+        await addReferenceImages(files);
+      });
+
+      document.querySelectorAll("[data-ratio]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("[data-ratio]").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          currentRatio = button.dataset.ratio;
+          applyRatio(currentRatio);
+          updateCustomSizeVisibility();
+        });
+      });
+
+      document.querySelectorAll("[data-count]").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("[data-count]").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          currentCount = Number(button.dataset.count);
+        });
+      });
+
+      generateButton.addEventListener("click", async () => {
+        setBusy(true, "正在调用 gpt-image-2 生成主图，可能需要 30-120 秒...");
+        isSliceMode = false;
+        activeSliceId = null;
+        sliceEdit = null;
+        sliceModeButton.classList.remove("active");
+        sliceModeButton.disabled = true;
+        renderLoadingResult("正在调用 gpt-image-2 生成主图<br />通常需要 30-120 秒");
+        try {
+          const options = {
+            prompt: promptInput.value.trim(),
+            mode: currentMode,
+            style: currentStyle,
+            count: currentCount,
+            width: clampNumber(Number(widthInput.value), 256, 4096, 390),
+            height: clampNumber(Number(heightInput.value), 256, 4096, 844)
+          };
+          currentManifest = await createBackendManifest(options);
+          renderResults(currentManifest);
+          renderCutModules(currentManifest);
+          sliceModeButton.disabled = false;
+          placeButton.disabled = false;
+          downloadAllButton.disabled = false;
+          if (currentManifest.resultImages.length !== currentCount) {
+            setStatus(`已请求 ${currentCount} 张图片，实际返回 ${currentManifest.resultImages.length} 张。`, currentManifest.resultImages.length < currentCount);
+          } else {
+            const returnedSize = `${currentManifest.screen.width}×${currentManifest.screen.height}`;
+            const providerNote = currentManifest.provider ? `模型：${currentManifest.provider.model} · 请求尺寸：${currentManifest.provider.size} · 返回尺寸：${returnedSize}` : "";
+            setStatus(currentManifest.mode === "api" ? `图片已生成。${providerNote}` : "未连接后端或未配置 Key，已使用 mock 资源。");
+          }
+        } catch (error) {
+          currentManifest = null;
+          isSliceMode = false;
+          activeSliceId = null;
+          sliceEdit = null;
+          renderErrorResult(error.message || String(error));
+          renderEmptyCutModules();
+          sliceModeButton.disabled = true;
+          placeButton.disabled = true;
+          downloadAllButton.disabled = true;
+          setStatus(`生成失败：${error.message || String(error)}`, true);
+        } finally {
+          setBusy(false);
+        }
+      });
+
+      sliceModeButton.addEventListener("click", () => {
+        if (!currentManifest?.resultImages?.length) {
+          return;
+        }
+        isSliceMode = !isSliceMode;
+        sliceDraft = null;
+        sliceEdit = null;
+        sliceModeButton.classList.toggle("active", isSliceMode);
+        renderActiveResult(currentManifest);
+        renderCutModules(currentManifest);
+        setStatus(isSliceMode ? "切图模式已开启：在当前设计稿上拖拽框选区域。" : "切图模式已关闭。");
+      });
+
+      placeButton.addEventListener("click", async () => {
+        if (!currentManifest) {
+          return;
+        }
+        if (!isEmbeddedPluginHost()) {
+          setStatus("当前是直接打开的 ui.html 页面；“放入 Figma”只有在 Figma 插件窗口或模拟器里才会创建画布。", true);
+          return;
+        }
+
+        setBusy(true, "正在准备回填到 Figma...");
+        let placementManifest;
+        try {
+          placementManifest = await buildPlacementManifest(currentManifest);
+        } catch (error) {
+          setBusy(false);
+          setStatus(`放入 Figma 失败：${error.message || String(error)}`, true);
+          return;
+        }
+
+        parent.postMessage(
+          {
+            pluginMessage: {
+              type: "create-ui-asset-screen",
+              manifest: placementManifest
+            }
+          },
+          "*"
+        );
+        setBusy(false);
+        setStatus("已发送到 Figma 画布。");
+      });
+
+      downloadAllButton.addEventListener("click", () => {
+        if (!currentManifest?.resultImages?.length) {
+          setStatus("还没有可下载的图片。", true);
+          return;
+        }
+        currentManifest.resultImages.forEach((image, index) => {
+          triggerImageDownload(image.dataUrl, buildDownloadFilename(index));
+        });
+        setStatus(`已开始下载 ${currentManifest.resultImages.length} 张图片。`);
+      });
+
+      window.onmessage = (event) => {
+        const message = event.data.pluginMessage;
+        if (message && message.type === "generation-error") {
+          setStatus(message.message, true);
+        }
+      };
+
+      window.addEventListener("resize", () => {
+        if (currentManifest?.resultImages?.length) {
+          const frame = resultGrid.querySelector(".result-frame");
+          const image = resultGrid.querySelector("img");
+          schedulePreviewFit(image, frame);
+        }
+      });
+
+      async function createBackendManifest(options) {
+        if (options.mode === "image-to-image") {
+          return createBackendImageEditManifest(options);
+        }
+
+        const response = await fetch(`${PROXY_BASE_URL}/api/images/generate`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            prompt: options.prompt,
+            width: options.width,
+            height: options.height,
+            count: options.count,
+            quality: "high",
+            outputFormat: "png",
+            background: "opaque"
+          })
+        });
+
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({}));
+          throw new Error(errorBody.error || `API request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!Array.isArray(data.images) || data.images.length === 0) {
+          throw new Error("API did not return images");
+        }
+
+        const resultImages = await prepareResultImages(data.images);
+        const screen = createScreenFromResultImage(resultImages[0], {
+          name: "ai_app_home_api",
+          width: options.width,
+          height: options.height
+        });
+        const assets = getPlannedAssets(screen).map((asset) => ({
+          ...asset,
+          dataUrl: createTransparentAssetPng(asset.placement.width, asset.placement.height, asset.kind)
+        }));
+        return {
+          version: "1.0.0",
+          mode: "api",
+          provider: data.provider || null,
+          sourcePrompt: options.prompt,
+          style: options.style,
+          screen,
+          previewImage: {
+            dataUrl: resultImages[0].dataUrl
+          },
+          resultImages,
+          assets
+        };
+      }
+
+      async function createBackendImageEditManifest(options) {
+        if (referenceImages.length === 0) {
+          throw new Error("请先上传至少 1 张参考图");
+        }
+
+        const response = await fetch(`${PROXY_BASE_URL}/api/images/edit`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            prompt: options.prompt,
+            width: options.width,
+            height: options.height,
+            count: options.count,
+            quality: "high",
+            outputFormat: "png",
+            background: "opaque",
+            images: referenceImages
+          })
+        });
+
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({}));
+          throw new Error(errorBody.error || `API request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!Array.isArray(data.images) || data.images.length === 0) {
+          throw new Error("API did not return images");
+        }
+
+        const resultImages = await prepareResultImages(data.images);
+        const screen = createScreenFromResultImage(resultImages[0], {
+          name: "ai_app_home_edit_api",
+          width: options.width,
+          height: options.height
+        });
+        const assets = getPlannedAssets(screen).map((asset) => ({
+          ...asset,
+          dataUrl: createTransparentAssetPng(asset.placement.width, asset.placement.height, asset.kind)
+        }));
+        return {
+          version: "1.0.0",
+          mode: "api",
+          provider: data.provider || null,
+          sourcePrompt: options.prompt,
+          style: options.style,
+          screen,
+          previewImage: {
+            dataUrl: resultImages[0].dataUrl
+          },
+          resultImages,
+          assets
+        };
+      }
+
+      async function createTransparentAssetsFromBackend(options, screen) {
+        const plannedAssets = getPlannedAssets(screen);
+        const results = await Promise.allSettled(
+          plannedAssets.map(async (asset) => {
+            const response = await fetch(`${PROXY_BASE_URL}/api/assets/generate-transparent`, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json"
+              },
+              body: JSON.stringify({
+                prompt: asset.prompt,
+                width: asset.placement.width,
+                height: asset.placement.height,
+                quality: "high"
+              })
+            });
+
+            if (!response.ok) {
+              const errorBody = await response.json().catch(() => ({}));
+              throw new Error(errorBody.error || `Asset request failed: ${response.status}`);
+            }
+
+            const data = await response.json();
+            const image = data.images && data.images[0];
+            if (!image || !image.dataUrl) {
+              throw new Error(`Asset ${asset.name} did not return image data`);
+            }
+
+            return {
+              ...asset,
+              dataUrl: image.dataUrl
+            };
+          })
+        );
+
+        return plannedAssets.map((asset, index) => {
+          const result = results[index];
+          if (result.status === "fulfilled") {
+            return result.value;
+          }
+          return {
+            ...asset,
+            dataUrl: createTransparentAssetPng(asset.placement.width, asset.placement.height, asset.kind)
+          };
+        });
+      }
+
+      function getPlannedAssets(screen) {
+        return [
+          {
+            id: "hero_illustration",
+            name: "hero_illustration",
+            type: "illustration",
+            kind: "illustration",
+            prompt: "Hero app illustration, transparent background",
+            placement: scalePlacement({ x: 196, y: 122, width: 132, height: 132 }, screen),
+            transparent: true,
+            selected: true
+          },
+          {
+            id: "tab_home_icon",
+            name: "tab_home_icon",
+            type: "icon",
+            kind: "home",
+            prompt: "Minimal home icon, rounded stroke, transparent background",
+            placement: scalePlacement({ x: 44, y: 790, width: 26, height: 26 }, screen),
+            transparent: true,
+            selected: true
+          },
+          {
+            id: "tab_workout_icon",
+            name: "tab_workout_icon",
+            type: "icon",
+            kind: "bolt",
+            prompt: "Minimal workout lightning icon, rounded stroke, transparent background",
+            placement: scalePlacement({ x: 132, y: 790, width: 26, height: 26 }, screen),
+            transparent: true,
+            selected: true
+          },
+          {
+            id: "tab_profile_icon",
+            name: "tab_profile_icon",
+            type: "icon",
+            kind: "profile",
+            prompt: "Minimal user profile icon, rounded stroke, transparent background",
+            placement: scalePlacement({ x: 320, y: 790, width: 26, height: 26 }, screen),
+            transparent: true,
+            selected: true
+          }
+        ];
+      }
+
+      async function createMockManifest(options) {
+        const screen = {
+          name: "ai_app_home_mock",
+          width: options.width,
+          height: options.height
+        };
+        const previewImage = {
+          dataUrl: createPreviewPng(screen.width, screen.height, options.prompt, options.style, 0)
+        };
+
+        const assets = getPlannedAssets(screen).map((asset) => ({
+          ...asset,
+          dataUrl: createTransparentAssetPng(asset.placement.width, asset.placement.height, asset.kind)
+        }));
+
+        const resultImages = Array.from({ length: Math.min(options.count, 4) }, (_, index) => ({
+          id: `result_${index + 1}`,
+          dataUrl: createPreviewPng(screen.width, screen.height, options.prompt, options.style, index)
+        }));
+
+        return {
+          version: "1.0.0",
+          mode: "mock",
+          sourcePrompt: options.prompt,
+          style: options.style,
+          screen,
+          previewImage,
+          resultImages,
+          assets
+        };
+      }
+
+      function renderResults(manifest) {
+        activeResultIndex = 0;
+        activeSliceId = null;
+        sliceEdit = null;
+        isSliceMode = false;
+        sliceModeButton.classList.remove("active");
+        ensureSliceState(manifest);
+        renderActiveResult(manifest);
+        resultCount.textContent = `共 ${manifest.resultImages.length} 张`;
+      }
+
+      function renderLoadingResult(message) {
+        resultGrid.innerHTML = `
+          <div class="result-loading" role="status" aria-live="polite">
+            <div class="loading-preview" aria-hidden="true"></div>
+            <div class="loading-label">正在生成图片</div>
+            <div class="loading-note">${message}</div>
+          </div>
+        `;
+        resultCount.textContent = "生成中";
+      }
+
+      function renderErrorResult(message) {
+        resultGrid.innerHTML = `
+          <div class="result-error" role="alert">
+            <strong>没有生成成功</strong>
+            <span>${escapeHtml(message)}</span>
+          </div>
+        `;
+        resultCount.textContent = "生成失败";
+      }
+
+      function renderActiveResult(manifest) {
+        const scrollState = getResultFrameScrollState();
+        resultGrid.innerHTML = "";
+        const activeImage = manifest.resultImages[activeResultIndex] || manifest.resultImages[0];
+        const shouldRestoreScroll = scrollState && scrollState.resultId === activeImage.id;
+        ensureImageSliceState(activeImage);
+        manifest.previewImage = { dataUrl: activeImage.dataUrl };
+        const hasMultiple = manifest.resultImages.length > 1;
+
+        const card = document.createElement("div");
+        card.className = `result-card${isSliceMode ? " slice-mode" : ""}`;
+        card.innerHTML = `
+          <div class="result-frame">
+            <div class="result-canvas">
+              <img src="${activeImage.dataUrl}" alt="当前生成结果" />
+              <div class="slice-layer" aria-label="切图选择层"></div>
+            </div>
+          </div>
+          <button class="carousel-nav prev" type="button" aria-label="上一张" ${hasMultiple ? "" : "disabled"}>‹</button>
+          <button class="carousel-nav next" type="button" aria-label="下一张" ${hasMultiple ? "" : "disabled"}>›</button>
+          <button class="download" type="button" aria-label="下载单张">↓</button>
+        `;
+        card.querySelector(".carousel-nav.prev").addEventListener("click", () => {
+          if (!hasMultiple) {
+            return;
+          }
+          activeResultIndex = (activeResultIndex - 1 + manifest.resultImages.length) % manifest.resultImages.length;
+          activeSliceId = null;
+          sliceEdit = null;
+          renderActiveResult(manifest);
+          renderCutModules(manifest);
+        });
+        card.querySelector(".carousel-nav.next").addEventListener("click", () => {
+          if (!hasMultiple) {
+            return;
+          }
+          activeResultIndex = (activeResultIndex + 1) % manifest.resultImages.length;
+          activeSliceId = null;
+          sliceEdit = null;
+          renderActiveResult(manifest);
+          renderCutModules(manifest);
+        });
+        card.querySelector(".download").addEventListener("click", () => {
+          triggerImageDownload(activeImage.dataUrl, buildDownloadFilename(activeResultIndex));
+          setStatus(`已开始下载第 ${activeResultIndex + 1} 张图片。`);
+        });
+        resultGrid.appendChild(card);
+        renderedResultImageId = activeImage.id;
+        const frame = card.querySelector(".result-frame");
+        const image = card.querySelector("img");
+        const layer = card.querySelector(".slice-layer");
+        bindSliceLayer(card, layer, image);
+        attachPreviewFit(image, frame);
+        image.addEventListener("load", () => {
+          renderSliceOverlay(card, layer, image);
+          if (shouldRestoreScroll) {
+            restoreResultFrameScroll(frame, scrollState);
+          }
+        }, { once: true });
+        if (image.complete) {
+          renderSliceOverlay(card, layer, image);
+          if (shouldRestoreScroll) {
+            restoreResultFrameScroll(frame, scrollState);
+          }
+        }
+      }
+
+      function getResultFrameScrollState() {
+        const frame = resultGrid.querySelector(".result-frame");
+        if (!frame || !renderedResultImageId) {
+          return null;
+        }
+        return {
+          resultId: renderedResultImageId,
+          left: frame.scrollLeft,
+          top: frame.scrollTop
+        };
+      }
+
+      function restoreResultFrameScroll(frame, scrollState) {
+        if (!frame || !scrollState) {
+          return;
+        }
+        const apply = () => {
+          frame.scrollLeft = scrollState.left;
+          frame.scrollTop = scrollState.top;
+        };
+        apply();
+        requestAnimationFrame(() => {
+          apply();
+          requestAnimationFrame(apply);
+        });
+      }
+
+      function renderCutModules(manifest) {
+        if (!manifest?.resultImages?.length) {
+          renderEmptyCutModules();
+          return;
+        }
+        cutSection.classList.add("open");
+        const activeImage = getActiveResultImage();
+        ensureImageSliceState(activeImage);
+        const assets = activeImage.sliceManifest.assets;
+        exportSlicesButton.disabled = assets.length === 0;
+        transparentAllButton.disabled = assets.length === 0 || assets.every((asset) => asset.transparent);
+        cutHelp.textContent = isSliceMode ? "拖拽主图创建切图区域" : "点击“切图”后框选区域";
+        if (assets.length === 0) {
+          cutGrid.innerHTML = `<div class="cut-empty">还没有切图区域</div>`;
+          return;
+        }
+        cutGrid.innerHTML = assets.map((asset, index) => `
+          <div class="cut-item${asset.id === activeSliceId ? " active" : ""}" data-slice-id="${asset.id}">
+            <img class="cut-thumb" src="${asset.dataUrl}" alt="${escapeHtml(asset.name)}" />
+            <div class="cut-meta">
+              <span class="cut-name">${index + 1}. ${escapeHtml(asset.name)}</span>
+              <span class="cut-size">${asset.placement.width} × ${asset.placement.height}${asset.transparent ? " · 透明 PNG" : ""}</span>
+            </div>
+            <button class="cut-transparent${asset.transparent ? " done" : ""}" type="button" data-transparent-slice="${asset.id}">${asset.transparent ? "已透明" : "透明"}</button>
+            <button class="cut-remove" type="button" aria-label="删除 ${escapeHtml(asset.name)}" data-remove-slice="${asset.id}">×</button>
+          </div>
+        `).join("");
+        cutGrid.querySelectorAll("[data-slice-id]").forEach((item) => {
+          item.addEventListener("click", (event) => {
+            if (event.target.closest("[data-remove-slice]")) {
+              return;
+            }
+            activeSliceId = item.dataset.sliceId;
+            renderActiveResult(manifest);
+            renderCutModules(manifest);
+          });
+        });
+        cutGrid.querySelectorAll("[data-remove-slice]").forEach((button) => {
+          button.addEventListener("click", () => {
+            removeSliceAsset(button.dataset.removeSlice);
+          });
+        });
+        cutGrid.querySelectorAll("[data-transparent-slice]").forEach((button) => {
+          button.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            await makeSliceTransparent(button.dataset.transparentSlice);
+          });
+        });
+      }
+
+      function renderEmptyCutModules() {
+        cutSection.classList.remove("open");
+        exportSlicesButton.disabled = true;
+        transparentAllButton.disabled = true;
+        cutGrid.innerHTML = "";
+      }
+
+      function ensureSliceState(manifest) {
+        (manifest.resultImages || []).forEach(ensureImageSliceState);
+      }
+
+      function ensureImageSliceState(image) {
+        if (!image) {
+          return;
+        }
+        if (!image.sliceManifest) {
+          image.sliceManifest = { assets: [] };
+        }
+        if (!Array.isArray(image.sliceManifest.assets)) {
+          image.sliceManifest.assets = [];
+        }
+      }
+
+      function getActiveResultImage() {
+        if (!currentManifest?.resultImages?.length) {
+          return null;
+        }
+        return currentManifest.resultImages[activeResultIndex] || currentManifest.resultImages[0];
+      }
+
+      function bindSliceLayer(card, layer, image) {
+        if (!card || !layer || !image) {
+          return;
+        }
+        layer.addEventListener("pointerdown", (event) => {
+          if (!isSliceMode || event.button !== 0) {
+            return;
+          }
+          const imageRect = image.getBoundingClientRect();
+          const handle = event.target.closest("[data-slice-handle]");
+          const sliceBox = event.target.closest("[data-slice-id]");
+          if (sliceBox) {
+            const asset = getActiveSliceAsset(sliceBox.dataset.sliceId);
+            if (!asset) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            activeSliceId = asset.id;
+            layer.setPointerCapture(event.pointerId);
+            const point = pointToScreenCoords(event.clientX, event.clientY, imageRect);
+            sliceEdit = {
+              id: asset.id,
+              mode: handle?.dataset.sliceHandle || "move",
+              startX: point.x,
+              startY: point.y,
+              original: { ...asset.placement }
+            };
+            renderSliceOverlay(card, layer, image);
+            renderCutModules(currentManifest);
+            return;
+          }
+          if (!isPointInsideRect(event.clientX, event.clientY, imageRect)) {
+            return;
+          }
+          event.preventDefault();
+          layer.setPointerCapture(event.pointerId);
+          const startPoint = pointToScreenCoords(event.clientX, event.clientY, imageRect);
+          sliceDraft = {
+            startX: startPoint.x,
+            startY: startPoint.y,
+            currentX: startPoint.x,
+            currentY: startPoint.y
+          };
+          renderSliceOverlay(card, layer, image);
+        });
+
+        layer.addEventListener("pointermove", (event) => {
+          if (sliceEdit) {
+            const imageRect = image.getBoundingClientRect();
+            const point = pointToScreenCoords(event.clientX, event.clientY, imageRect);
+            const asset = getActiveSliceAsset(sliceEdit.id);
+            if (!asset) {
+              return;
+            }
+            asset.placement = normalizeEditedPlacement(sliceEdit, point);
+            renderSliceOverlay(card, layer, image);
+            return;
+          }
+          if (!sliceDraft) {
+            return;
+          }
+          const imageRect = image.getBoundingClientRect();
+          const point = pointToScreenCoords(event.clientX, event.clientY, imageRect);
+          sliceDraft.currentX = point.x;
+          sliceDraft.currentY = point.y;
+          renderSliceOverlay(card, layer, image);
+        });
+
+        layer.addEventListener("pointerup", async (event) => {
+          if (sliceEdit) {
+            layer.releasePointerCapture(event.pointerId);
+            const editId = sliceEdit.id;
+            sliceEdit = null;
+            await updateSliceAssetCrop(editId);
+            renderActiveResult(currentManifest);
+            renderCutModules(currentManifest);
+            setStatus("已更新切图区域。");
+            return;
+          }
+          if (!sliceDraft) {
+            return;
+          }
+          layer.releasePointerCapture(event.pointerId);
+          const draft = normalizeDraftRect(sliceDraft);
+          sliceDraft = null;
+          if (draft.width < 8 || draft.height < 8) {
+            renderSliceOverlay(card, layer, image);
+            return;
+          }
+          await addSliceAsset(draft);
+        });
+
+        layer.addEventListener("pointercancel", () => {
+          sliceDraft = null;
+          sliceEdit = null;
+          renderSliceOverlay(card, layer, image);
+        });
+      }
+
+      function renderSliceOverlay(card, layer, image) {
+        if (!card || !layer || !image || !currentManifest?.screen) {
+          return;
+        }
+        const activeImage = getActiveResultImage();
+        ensureImageSliceState(activeImage);
+        const imageRect = image.getBoundingClientRect();
+        const scaleX = imageRect.width / currentManifest.screen.width;
+        const scaleY = imageRect.height / currentManifest.screen.height;
+        const assets = activeImage?.sliceManifest?.assets || [];
+
+        const cutouts = assets.map((asset) => {
+          const placement = asset.placement;
+          return `
+            <div class="slice-cutout" style="
+              left:${placement.x * scaleX}px;
+              top:${placement.y * scaleY}px;
+              width:${placement.width * scaleX}px;
+              height:${placement.height * scaleY}px;
+            "></div>
+          `;
+        });
+
+        const boxes = assets.map((asset, index) => {
+          const placement = asset.placement;
+          const activeHandles = asset.id === activeSliceId ? `
+              <span class="slice-handle" data-slice-handle="nw"></span>
+              <span class="slice-handle" data-slice-handle="n"></span>
+              <span class="slice-handle" data-slice-handle="ne"></span>
+              <span class="slice-handle" data-slice-handle="e"></span>
+              <span class="slice-handle" data-slice-handle="se"></span>
+              <span class="slice-handle" data-slice-handle="s"></span>
+              <span class="slice-handle" data-slice-handle="sw"></span>
+              <span class="slice-handle" data-slice-handle="w"></span>
+          ` : "";
+          return `
+            <button class="slice-box${asset.id === activeSliceId ? " active" : ""}" type="button" data-slice-id="${asset.id}" style="
+              left:${placement.x * scaleX}px;
+              top:${placement.y * scaleY}px;
+              width:${placement.width * scaleX}px;
+              height:${placement.height * scaleY}px;
+            ">
+              <span class="slice-label">${index + 1}. ${escapeHtml(asset.name)}</span>
+              ${activeHandles}
+            </button>
+          `;
+        });
+
+        if (sliceDraft) {
+          const draft = normalizeDraftRect(sliceDraft);
+          boxes.push(`
+            <div class="slice-draft" style="
+              left:${draft.x * scaleX}px;
+              top:${draft.y * scaleY}px;
+              width:${draft.width * scaleX}px;
+              height:${draft.height * scaleY}px;
+            "></div>
+          `);
+        }
+
+        layer.innerHTML = [...cutouts, ...boxes].join("");
+        layer.querySelectorAll("[data-slice-id]").forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.stopPropagation();
+            activeSliceId = button.dataset.sliceId;
+            renderSliceOverlay(card, layer, image);
+            renderCutModules(currentManifest);
+          });
+        });
+      }
+
+      function getActiveSliceAsset(id) {
+        const activeImage = getActiveResultImage();
+        ensureImageSliceState(activeImage);
+        return activeImage?.sliceManifest?.assets.find((asset) => asset.id === id) || null;
+      }
+
+      function normalizeEditedPlacement(edit, point) {
+        const screen = currentManifest.screen;
+        const minSize = 8;
+        const original = edit.original;
+        const deltaX = point.x - edit.startX;
+        const deltaY = point.y - edit.startY;
+        let x1 = original.x;
+        let y1 = original.y;
+        let x2 = original.x + original.width;
+        let y2 = original.y + original.height;
+
+        if (edit.mode === "move") {
+          const nextX = clampNumber(original.x + deltaX, 0, screen.width - original.width, 0);
+          const nextY = clampNumber(original.y + deltaY, 0, screen.height - original.height, 0);
+          return {
+            x: Math.round(nextX),
+            y: Math.round(nextY),
+            width: original.width,
+            height: original.height
+          };
+        }
+
+        if (edit.mode.includes("w")) {
+          x1 = clampNumber(original.x + deltaX, 0, x2 - minSize, 0);
+        }
+        if (edit.mode.includes("e")) {
+          x2 = clampNumber(original.x + original.width + deltaX, x1 + minSize, screen.width, screen.width);
+        }
+        if (edit.mode.includes("n")) {
+          y1 = clampNumber(original.y + deltaY, 0, y2 - minSize, 0);
+        }
+        if (edit.mode.includes("s")) {
+          y2 = clampNumber(original.y + original.height + deltaY, y1 + minSize, screen.height, screen.height);
+        }
+
+        return {
+          x: Math.round(x1),
+          y: Math.round(y1),
+          width: Math.max(minSize, Math.round(x2 - x1)),
+          height: Math.max(minSize, Math.round(y2 - y1))
+        };
+      }
+
+      async function addSliceAsset(placement) {
+        const activeImage = getActiveResultImage();
+        if (!activeImage) {
+          return;
+        }
+        ensureImageSliceState(activeImage);
+        const index = activeImage.sliceManifest.assets.length + 1;
+        const id = `slice_${activeResultIndex + 1}_${Date.now().toString(36)}_${index}`;
+        const name = `slice_${String(index).padStart(2, "0")}`;
+        const dataUrl = await cropImageRegion(activeImage.dataUrl, placement);
+        const repair = await createSliceRepairPatch(activeImage.dataUrl, placement);
+        const asset = {
+          id,
+          name,
+          type: "manual_slice",
+          placement,
+          transparent: false,
+          selected: true,
+          dataUrl,
+          ...repair
+        };
+        activeImage.sliceManifest.assets.push(asset);
+        activeSliceId = id;
+        renderActiveResult(currentManifest);
+        renderCutModules(currentManifest);
+        setStatus(`已创建切图区域：${name}`);
+      }
+
+      async function updateSliceAssetCrop(id) {
+        const activeImage = getActiveResultImage();
+        const asset = getActiveSliceAsset(id);
+        if (!activeImage || !asset) {
+          return;
+        }
+        asset.dataUrl = await cropImageRegion(activeImage.dataUrl, asset.placement);
+        Object.assign(asset, await createSliceRepairPatch(activeImage.dataUrl, asset.placement));
+        asset.transparent = false;
+      }
+
+      async function makeSliceTransparent(id) {
+        const asset = getActiveSliceAsset(id);
+        if (!asset) {
+          return;
+        }
+        setBusy(true, `正在处理透明底：${asset.name}`);
+        try {
+          asset.dataUrl = await removeEdgeBackground(asset.dataUrl);
+          asset.transparent = true;
+          activeSliceId = id;
+          renderActiveResult(currentManifest);
+          renderCutModules(currentManifest);
+          setStatus(`已生成透明 PNG：${asset.name}`);
+        } catch (error) {
+          setStatus(`透明化失败：${error.message || String(error)}`, true);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function makeAllSlicesTransparent() {
+        const activeImage = getActiveResultImage();
+        ensureImageSliceState(activeImage);
+        const assets = activeImage?.sliceManifest?.assets || [];
+        const pendingAssets = assets.filter((asset) => !asset.transparent);
+        if (pendingAssets.length === 0) {
+          setStatus("当前设计稿的切图都已经是透明 PNG。");
+          renderCutModules(currentManifest);
+          return;
+        }
+
+        setBusy(true, `正在批量透明化 ${pendingAssets.length} 个切图...`);
+        transparentAllButton.disabled = true;
+        try {
+          for (const asset of pendingAssets) {
+            asset.dataUrl = await removeEdgeBackground(asset.dataUrl);
+            asset.transparent = true;
+          }
+          activeSliceId = pendingAssets[pendingAssets.length - 1].id;
+          renderActiveResult(currentManifest);
+          renderCutModules(currentManifest);
+          setStatus(`已批量生成 ${pendingAssets.length} 个透明 PNG。`);
+        } catch (error) {
+          renderCutModules(currentManifest);
+          setStatus(`批量透明化失败：${error.message || String(error)}`, true);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function exportSlicePackage() {
+        const activeImage = getActiveResultImage();
+        ensureImageSliceState(activeImage);
+        const assets = activeImage?.sliceManifest?.assets || [];
+        if (assets.length === 0) {
+          setStatus("还没有可导出的切图资产。", true);
+          return;
+        }
+
+        setBusy(true, `正在打包 ${assets.length} 个切图资产...`);
+        exportSlicesButton.disabled = true;
+        try {
+          const imageIndex = activeResultIndex + 1;
+          const manifest = buildSliceExportManifest(activeImage, imageIndex);
+          const files = [
+            {
+              name: "manifest.json",
+              data: textToUint8Array(JSON.stringify(manifest, null, 2))
+            }
+          ];
+
+          assets.forEach((asset, index) => {
+            files.push({
+              name: `assets/${sanitizeFilename(asset.name || `slice_${index + 1}`)}.png`,
+              data: dataUrlToUint8Array(asset.dataUrl)
+            });
+          });
+
+          const zipBlob = createZipBlob(files);
+          triggerBlobDownload(zipBlob, `ai-ui-slices-image-${imageIndex}.zip`);
+          setStatus(`已导出 ${assets.length} 个切图资产和 manifest.json。`);
+        } catch (error) {
+          setStatus(`导出切图包失败：${error.message || String(error)}`, true);
+        } finally {
+          setBusy(false);
+          renderCutModules(currentManifest);
+        }
+      }
+
+      function removeSliceAsset(id) {
+        const activeImage = getActiveResultImage();
+        if (!activeImage?.sliceManifest?.assets) {
+          return;
+        }
+        activeImage.sliceManifest.assets = activeImage.sliceManifest.assets.filter((asset) => asset.id !== id);
+        if (activeSliceId === id) {
+          activeSliceId = null;
+        }
+        renderActiveResult(currentManifest);
+        renderCutModules(currentManifest);
+      }
+
+      async function cropImageRegion(dataUrl, placement) {
+        const source = await loadImageElement(dataUrl);
+        const canvas = document.createElement("canvas");
+        canvas.width = placement.width;
+        canvas.height = placement.height;
+        const context = canvas.getContext("2d");
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
+        context.drawImage(
+          source,
+          placement.x,
+          placement.y,
+          placement.width,
+          placement.height,
+          0,
+          0,
+          placement.width,
+          placement.height
+        );
+        return canvas.toDataURL("image/png");
+      }
+
+      async function createSliceRepairPatch(dataUrl, placement) {
+        const source = await loadImageElement(dataUrl);
+        const patchWidth = Math.max(1, Math.round(placement.width));
+        const patchHeight = Math.max(1, Math.round(placement.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = patchWidth;
+        canvas.height = patchHeight;
+        const context = canvas.getContext("2d");
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
+
+        const edgeStats = sampleImmediatePlacementEdgeStats(source, placement);
+        const background = edgeStats.color;
+        const sides = edgeStats.sides || {
+          top: background,
+          right: background,
+          bottom: background,
+          left: background
+        };
+        const colorA = toRgb(mixColors(sides.left, sides.top, 0.42));
+        const colorB = toRgb(mixColors(sides.right, sides.bottom, 0.42));
+        paintEdgeBlendRepairPatch(context, patchWidth, patchHeight, sides, background);
+
+        return {
+          repairDataUrl: canvas.toDataURL("image/png"),
+          repairBackground: `linear-gradient(135deg, rgba(${colorA}, 0.92), rgba(${colorB}, 0.94))`,
+          repairMode: "edge-blend"
+        };
+      }
+
+      function getExpandedSampleRect(source, placement) {
+        const naturalWidth = source.naturalWidth || source.width;
+        const naturalHeight = source.naturalHeight || source.height;
+        const expandX = Math.max(16, Math.round(placement.width * 0.28));
+        const expandY = Math.max(16, Math.round(placement.height * 0.28));
+        const x = clampNumber(Math.round(placement.x - expandX), 0, naturalWidth - 1, 0);
+        const y = clampNumber(Math.round(placement.y - expandY), 0, naturalHeight - 1, 0);
+        const right = clampNumber(Math.round(placement.x + placement.width + expandX), x + 1, naturalWidth, naturalWidth);
+        const bottom = clampNumber(Math.round(placement.y + placement.height + expandY), y + 1, naturalHeight, naturalHeight);
+        return {
+          x,
+          y,
+          width: Math.max(1, right - x),
+          height: Math.max(1, bottom - y)
+        };
+      }
+
+      async function samplePlacementEdgeStats(source, placement) {
+        const sample = getExpandedSampleRect(source, placement);
+        const canvas = document.createElement("canvas");
+        canvas.width = sample.width;
+        canvas.height = sample.height;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        context.drawImage(source, sample.x, sample.y, sample.width, sample.height, 0, 0, sample.width, sample.height);
+        const imageData = context.getImageData(0, 0, sample.width, sample.height);
+        return sampleEdgeStats(imageData.data, sample.width, sample.height);
+      }
+
+      function sampleImmediatePlacementEdgeStats(source, placement) {
+        const naturalWidth = source.naturalWidth || source.width;
+        const naturalHeight = source.naturalHeight || source.height;
+        const x = clampNumber(Math.round(placement.x), 0, naturalWidth - 1, 0);
+        const y = clampNumber(Math.round(placement.y), 0, naturalHeight - 1, 0);
+        const width = clampNumber(Math.round(placement.width), 1, naturalWidth - x, 1);
+        const height = clampNumber(Math.round(placement.height), 1, naturalHeight - y, 1);
+        const band = Math.max(2, Math.min(10, Math.round(Math.min(width, height) * 0.12)));
+        const canvas = document.createElement("canvas");
+        canvas.width = naturalWidth;
+        canvas.height = naturalHeight;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        context.drawImage(source, 0, 0, naturalWidth, naturalHeight);
+
+        const sideSamples = {
+          top: collectRectColors(context, x, Math.max(0, y - band), width, Math.min(band, y)),
+          right: collectRectColors(context, Math.min(naturalWidth - 1, x + width), y, Math.min(band, naturalWidth - x - width), height),
+          bottom: collectRectColors(context, x, Math.min(naturalHeight - 1, y + height), width, Math.min(band, naturalHeight - y - height)),
+          left: collectRectColors(context, Math.max(0, x - band), y, Math.min(band, x), height)
+        };
+        const allSamples = [
+          ...sideSamples.top,
+          ...sideSamples.right,
+          ...sideSamples.bottom,
+          ...sideSamples.left
+        ];
+        const color = averageBackgroundColors(allSamples);
+        const variance = allSamples.length
+          ? allSamples.reduce((sum, sample) => {
+              const distance = colorDistance(sample.r, sample.g, sample.b, color.r, color.g, color.b);
+              return sum + distance * distance;
+            }, 0) / allSamples.length
+          : 0;
+        return {
+          color,
+          variance,
+          sides: {
+            top: averageBackgroundColors(sideSamples.top, color),
+            right: averageBackgroundColors(sideSamples.right, color),
+            bottom: averageBackgroundColors(sideSamples.bottom, color),
+            left: averageBackgroundColors(sideSamples.left, color)
+          }
+        };
+      }
+
+      function collectRectColors(context, x, y, width, height) {
+        const rectWidth = Math.max(0, Math.floor(width));
+        const rectHeight = Math.max(0, Math.floor(height));
+        if (!rectWidth || !rectHeight) {
+          return [];
+        }
+        const imageData = context.getImageData(Math.floor(x), Math.floor(y), rectWidth, rectHeight);
+        const pixels = imageData.data;
+        const samples = [];
+        const step = Math.max(1, Math.floor(Math.sqrt((rectWidth * rectHeight) / 160)));
+        for (let row = 0; row < rectHeight; row += step) {
+          for (let col = 0; col < rectWidth; col += step) {
+            samples.push(getPixelColor(pixels, rectWidth, col, row));
+          }
+        }
+        return samples;
+      }
+
+      function paintEdgeBlendRepairPatch(context, width, height, sides, center) {
+        const imageData = context.createImageData(width, height);
+        const pixels = imageData.data;
+        const safeSides = {
+          top: sides.top || center,
+          right: sides.right || center,
+          bottom: sides.bottom || center,
+          left: sides.left || center
+        };
+        for (let y = 0; y < height; y += 1) {
+          const verticalAmount = height <= 1 ? 0.5 : y / (height - 1);
+          for (let x = 0; x < width; x += 1) {
+            const horizontalAmount = width <= 1 ? 0.5 : x / (width - 1);
+            const horizontal = mixColors(safeSides.left, safeSides.right, horizontalAmount);
+            const vertical = mixColors(safeSides.top, safeSides.bottom, verticalAmount);
+            const edgeBias = Math.min(x, y, width - 1 - x, height - 1 - y) / Math.max(width, height);
+            const centerWeight = clampNumber(edgeBias * 1.35, 0, 0.32, 0);
+            const blended = mixColors(mixColors(horizontal, vertical, 0.46), center, centerWeight);
+            const index = (y * width + x) * 4;
+            pixels[index] = Math.round(blended.r);
+            pixels[index + 1] = Math.round(blended.g);
+            pixels[index + 2] = Math.round(blended.b);
+            pixels[index + 3] = 255;
+          }
+        }
+        context.putImageData(imageData, 0, 0);
+      }
+
+      function paintRepairGradient(context, width, height, sides, center, isFlatBackground) {
+        const horizontal = context.createLinearGradient(0, 0, width, 0);
+        horizontal.addColorStop(0, `rgba(${toRgb(sides.left)}, ${isFlatBackground ? 0.86 : 0.2})`);
+        horizontal.addColorStop(0.48, `rgba(${toRgb(center)}, ${isFlatBackground ? 0.96 : 0.22})`);
+        horizontal.addColorStop(1, `rgba(${toRgb(sides.right)}, ${isFlatBackground ? 0.88 : 0.2})`);
+        context.fillStyle = horizontal;
+        context.fillRect(0, 0, width, height);
+
+        const vertical = context.createLinearGradient(0, 0, 0, height);
+        vertical.addColorStop(0, `rgba(${toRgb(sides.top)}, ${isFlatBackground ? 0.32 : 0.1})`);
+        vertical.addColorStop(0.58, "rgba(255, 255, 255, 0)");
+        vertical.addColorStop(1, `rgba(${toRgb(sides.bottom)}, ${isFlatBackground ? 0.28 : 0.1})`);
+        context.fillStyle = vertical;
+        context.fillRect(0, 0, width, height);
+
+        const sheen = context.createLinearGradient(0, 0, width, height);
+        sheen.addColorStop(0, `rgba(255, 255, 255, ${isFlatBackground ? 0.18 : 0.04})`);
+        sheen.addColorStop(0.55, "rgba(255, 255, 255, 0)");
+        sheen.addColorStop(1, `rgba(${toRgb(center)}, ${isFlatBackground ? 0.08 : 0.03})`);
+        context.fillStyle = sheen;
+        context.fillRect(0, 0, width, height);
+      }
+
+      function adjustColor(color, amount) {
+        return {
+          r: clampNumber(color.r + amount, 0, 255, color.r),
+          g: clampNumber(color.g + amount, 0, 255, color.g),
+          b: clampNumber(color.b + amount, 0, 255, color.b),
+          luma: clampNumber(color.luma + amount, 0, 255, color.luma)
+        };
+      }
+
+      function toRgb(color) {
+        return `${Math.round(color.r)}, ${Math.round(color.g)}, ${Math.round(color.b)}`;
+      }
+
+      function mixColors(a, b, weight = 0.5) {
+        const amount = clampNumber(weight, 0, 1, 0.5);
+        const inverse = 1 - amount;
+        const color = {
+          r: a.r * inverse + b.r * amount,
+          g: a.g * inverse + b.g * amount,
+          b: a.b * inverse + b.b * amount,
+          luma: 0
+        };
+        color.luma = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+        return color;
+      }
+
+      function addSoftLightWash(context, width, height, centerRgb, opacity) {
+        const radius = Math.max(width, height) * 0.92;
+        const glow = context.createRadialGradient(width * 0.42, height * 0.28, 0, width * 0.5, height * 0.44, radius);
+        glow.addColorStop(0, `rgba(255, 255, 255, ${opacity})`);
+        glow.addColorStop(0.46, `rgba(${centerRgb}, ${opacity * 0.42})`);
+        glow.addColorStop(1, "rgba(255, 255, 255, 0)");
+        context.fillStyle = glow;
+        context.fillRect(0, 0, width, height);
+      }
+
+      function addSubtleNoise(context, width, height, opacity) {
+        const imageData = context.getImageData(0, 0, width, height);
+        const pixels = imageData.data;
+        for (let index = 0; index < pixels.length; index += 4) {
+          const noise = (Math.random() - 0.5) * 4;
+          pixels[index] = clampNumber(pixels[index] + noise, 0, 255, pixels[index]);
+          pixels[index + 1] = clampNumber(pixels[index + 1] + noise, 0, 255, pixels[index + 1]);
+          pixels[index + 2] = clampNumber(pixels[index + 2] + noise, 0, 255, pixels[index + 2]);
+          pixels[index + 3] = Math.round(pixels[index + 3] * (1 - opacity) + 255 * opacity);
+        }
+        context.putImageData(imageData, 0, 0);
+      }
+
+      async function removeEdgeBackground(dataUrl) {
+        const source = await loadImageElement(dataUrl);
+        const canvas = document.createElement("canvas");
+        canvas.width = source.naturalWidth || source.width;
+        canvas.height = source.naturalHeight || source.height;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        context.drawImage(source, 0, 0);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const pixels = imageData.data;
+        const background = sampleEdgeColor(pixels, canvas.width, canvas.height);
+        const hardThreshold = 34;
+        const softThreshold = 82;
+
+        for (let index = 0; index < pixels.length; index += 4) {
+          const distance = colorDistance(
+            pixels[index],
+            pixels[index + 1],
+            pixels[index + 2],
+            background.r,
+            background.g,
+            background.b
+          );
+          if (distance <= hardThreshold) {
+            pixels[index + 3] = 0;
+          } else if (distance < softThreshold) {
+            const alphaRatio = (distance - hardThreshold) / (softThreshold - hardThreshold);
+            pixels[index + 3] = Math.round(pixels[index + 3] * alphaRatio);
+          }
+        }
+
+        context.putImageData(imageData, 0, 0);
+        return canvas.toDataURL("image/png");
+      }
+
+      function sampleEdgeStats(pixels, width, height) {
+        const sideSamples = {
+          top: [],
+          right: [],
+          bottom: [],
+          left: []
+        };
+        const step = Math.max(1, Math.floor(Math.min(width, height) / 18));
+        for (let x = 0; x < width; x += step) {
+          sideSamples.top.push(getPixelColor(pixels, width, x, 0));
+          sideSamples.bottom.push(getPixelColor(pixels, width, x, height - 1));
+        }
+        for (let y = 0; y < height; y += step) {
+          sideSamples.left.push(getPixelColor(pixels, width, 0, y));
+          sideSamples.right.push(getPixelColor(pixels, width, width - 1, y));
+        }
+        const samples = [
+          ...sideSamples.top,
+          ...sideSamples.right,
+          ...sideSamples.bottom,
+          ...sideSamples.left
+        ].sort((a, b) => a.luma - b.luma);
+        const start = Math.floor(samples.length * 0.2);
+        const end = Math.max(start + 1, Math.ceil(samples.length * 0.8));
+        const middleSamples = samples.slice(start, end);
+        const color = averageColors(middleSamples);
+        const variance = middleSamples.reduce((sum, sample) => {
+          const distance = colorDistance(sample.r, sample.g, sample.b, color.r, color.g, color.b);
+          return sum + distance * distance;
+        }, 0) / middleSamples.length;
+        return {
+          color,
+          variance,
+          sides: {
+            top: averageColors(sideSamples.top, color),
+            right: averageColors(sideSamples.right, color),
+            bottom: averageColors(sideSamples.bottom, color),
+            left: averageColors(sideSamples.left, color)
+          }
+        };
+      }
+
+      function averageColors(samples, fallback = { r: 244, g: 246, b: 250, luma: 246 }) {
+        if (!samples.length) {
+          return fallback;
+        }
+        const total = samples.reduce(
+          (sum, color) => ({
+            r: sum.r + color.r,
+            g: sum.g + color.g,
+            b: sum.b + color.b
+          }),
+          { r: 0, g: 0, b: 0 }
+        );
+        const color = {
+          r: total.r / samples.length,
+          g: total.g / samples.length,
+          b: total.b / samples.length,
+          luma: 0
+        };
+        color.luma = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+        return color;
+      }
+
+      function averageBackgroundColors(samples, fallback = { r: 244, g: 246, b: 250, luma: 246 }) {
+        if (!samples.length) {
+          return fallback;
+        }
+        const bySaturation = [...samples].sort((a, b) => a.saturation - b.saturation);
+        const lowSaturationCount = Math.max(6, Math.ceil(bySaturation.length * 0.68));
+        const backgroundCandidates = bySaturation.slice(0, lowSaturationCount).sort((a, b) => a.luma - b.luma);
+        const start = Math.floor(backgroundCandidates.length * 0.12);
+        const end = Math.max(start + 1, Math.ceil(backgroundCandidates.length * 0.88));
+        return averageColors(backgroundCandidates.slice(start, end), fallback);
+      }
+
+      function sampleEdgeColor(pixels, width, height) {
+        return sampleEdgeStats(pixels, width, height).color;
+      }
+
+      function getPixelColor(pixels, width, x, y) {
+        const index = (y * width + x) * 4;
+        const r = pixels[index];
+        const g = pixels[index + 1];
+        const b = pixels[index + 2];
+        return {
+          r,
+          g,
+          b,
+          luma: 0.2126 * r + 0.7152 * g + 0.0722 * b,
+          saturation: Math.max(r, g, b) - Math.min(r, g, b)
+        };
+      }
+
+      function colorDistance(r1, g1, b1, r2, g2, b2) {
+        const dr = r1 - r2;
+        const dg = g1 - g2;
+        const db = b1 - b2;
+        return Math.sqrt(dr * dr + dg * dg + db * db);
+      }
+
+      async function buildPlacementManifest(manifest) {
+        const activeImage = getActiveResultImage();
+        ensureImageSliceState(activeImage);
+        const assets = activeImage?.sliceManifest?.assets || [];
+        const previewDataUrl = await createRepairedPreviewImage(activeImage);
+        return {
+          ...manifest,
+          previewImage: { dataUrl: previewDataUrl || activeImage?.dataUrl || manifest.previewImage.dataUrl },
+          assets
+        };
+      }
+
+      async function createRepairedPreviewImage(activeImage) {
+        const assets = activeImage?.sliceManifest?.assets || [];
+        if (!activeImage?.dataUrl || assets.length === 0) {
+          return activeImage?.dataUrl || "";
+        }
+        const source = await loadImageElement(activeImage.dataUrl);
+        const width = source.naturalWidth || source.width;
+        const height = source.naturalHeight || source.height;
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        context.drawImage(source, 0, 0);
+
+        for (const asset of assets) {
+          if (!asset.repairDataUrl) {
+            Object.assign(asset, await createSliceRepairPatch(activeImage.dataUrl, asset.placement));
+          }
+          const repair = await loadImageElement(asset.repairDataUrl);
+          context.drawImage(
+            repair,
+            0,
+            0,
+            repair.naturalWidth || repair.width,
+            repair.naturalHeight || repair.height,
+            asset.placement.x,
+            asset.placement.y,
+            asset.placement.width,
+            asset.placement.height
+          );
+        }
+
+        return canvas.toDataURL("image/png");
+      }
+
+      function buildSliceExportManifest(activeImage, imageIndex) {
+        const screen = currentManifest.screen;
+        const assets = activeImage.sliceManifest.assets.map((asset, index) => {
+          const filename = `assets/${sanitizeFilename(asset.name || `slice_${index + 1}`)}.png`;
+          return {
+            id: asset.id,
+            name: asset.name,
+            filename,
+            format: "png",
+            transparent: Boolean(asset.transparent),
+            selectedImageIndex: imageIndex,
+            placement: { ...asset.placement }
+          };
+        });
+        return {
+          version: "1.0.0",
+          exportedAt: new Date().toISOString(),
+          sourcePrompt: currentManifest.sourcePrompt || "",
+          selectedImageIndex: imageIndex,
+          screen: {
+            name: screen.name,
+            width: screen.width,
+            height: screen.height
+          },
+          assets
+        };
+      }
+
+      function pointToScreenCoords(clientX, clientY, imageRect) {
+        const screen = currentManifest.screen;
+        const x = ((clientX - imageRect.left) / imageRect.width) * screen.width;
+        const y = ((clientY - imageRect.top) / imageRect.height) * screen.height;
+        return {
+          x: clampNumber(Math.round(x), 0, screen.width, 0),
+          y: clampNumber(Math.round(y), 0, screen.height, 0)
+        };
+      }
+
+      function normalizeDraftRect(draft) {
+        const screen = currentManifest.screen;
+        const x1 = clampNumber(Math.min(draft.startX, draft.currentX), 0, screen.width, 0);
+        const y1 = clampNumber(Math.min(draft.startY, draft.currentY), 0, screen.height, 0);
+        const x2 = clampNumber(Math.max(draft.startX, draft.currentX), 0, screen.width, screen.width);
+        const y2 = clampNumber(Math.max(draft.startY, draft.currentY), 0, screen.height, screen.height);
+        return {
+          x: Math.round(x1),
+          y: Math.round(y1),
+          width: Math.max(1, Math.round(x2 - x1)),
+          height: Math.max(1, Math.round(y2 - y1))
+        };
+      }
+
+      function isPointInsideRect(x, y, rect) {
+        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      }
+
+      function createPreviewPng(width, height, prompt, style, variant) {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        const scaleX = width / 390;
+        const scaleY = height / 844;
+        const scale = Math.min(scaleX, scaleY);
+
+        context.fillStyle = "#10141f";
+        context.fillRect(0, 0, width, height);
+
+        const offset = variant * 8;
+        drawRoundRect(context, 24 * scaleX, 52 * scaleY, 342 * scaleX, 220 * scaleY, 24 * scale, "#182335");
+        drawRoundRect(context, 42 * scaleX, 82 * scaleY, 144 * scaleX, 18 * scaleY, 9 * scale, variant % 2 ? "#f2994a" : "#45d2bc");
+        drawRoundRect(context, 42 * scaleX, 112 * scaleY, 112 * scaleX, 12 * scaleY, 6 * scale, "#e8f8f5");
+        drawRoundRect(context, 42 * scaleX, 142 * scaleY, 130 * scaleX, 44 * scaleY, 20 * scale, "#f2c94c");
+
+        context.fillStyle = variant % 2 ? "#f2c94c" : "#62d4c2";
+        context.beginPath();
+        context.arc((262 + offset) * scaleX, 154 * scaleY, 50 * scale, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = "#f5f7fb";
+        context.beginPath();
+        context.arc((286 + offset) * scaleX, 126 * scaleY, 20 * scale, 0, Math.PI * 2);
+        context.fill();
+
+        drawRoundRect(context, 24 * scaleX, 300 * scaleY, 158 * scaleX, 132 * scaleY, 18 * scale, "#f5f7fb");
+        drawRoundRect(context, 208 * scaleX, 300 * scaleY, 158 * scaleX, 132 * scaleY, 18 * scale, "#f5f7fb");
+        drawRoundRect(context, 42 * scaleX, 324 * scaleY, 72 * scaleX, 12 * scaleY, 6 * scale, "#182335");
+        drawRoundRect(context, 226 * scaleX, 324 * scaleY, 86 * scaleX, 12 * scaleY, 6 * scale, "#182335");
+        drawRoundRect(context, 42 * scaleX, 354 * scaleY, 104 * scaleX, 44 * scaleY, 18 * scale, "#45d2bc");
+        drawRoundRect(context, 226 * scaleX, 354 * scaleY, 104 * scaleX, 44 * scaleY, 18 * scale, "#f2994a");
+
+        drawRoundRect(context, 24 * scaleX, 468 * scaleY, 342 * scaleX, 236 * scaleY, 22 * scale, "#182335");
+        for (let index = 0; index < 4; index += 1) {
+          drawRoundRect(context, 44 * scaleX, (496 + index * 46) * scaleY, 52 * scaleX, 30 * scaleY, 14 * scale, index % 2 ? "#f2994a" : "#45d2bc");
+          drawRoundRect(context, 112 * scaleX, (502 + index * 46) * scaleY, 152 * scaleX, 10 * scaleY, 5 * scale, "#f5f7fb");
+          drawRoundRect(context, 112 * scaleX, (520 + index * 46) * scaleY, 92 * scaleX, 8 * scaleY, 4 * scale, "#6f7a8a");
+        }
+
+        drawRoundRect(context, 24 * scaleX, 764 * scaleY, 342 * scaleX, 56 * scaleY, 22 * scale, "#f5f7fb");
+        for (const x of [56, 144, 240, 332]) {
+          context.fillStyle = "#182335";
+          context.beginPath();
+          context.arc(x * scaleX, 792 * scaleY, 12 * scale, 0, Math.PI * 2);
+          context.fill();
+        }
+
+        context.font = `${Math.max(9, 11 * scale)}px Inter, system-ui, sans-serif`;
+        context.fillStyle = "#9aa4b2";
+        context.fillText((prompt || "").slice(0, 42), 24 * scaleX, 742 * scaleY);
+
+        return canvas.toDataURL("image/png");
+      }
+
+      function buildDownloadFilename(index) {
+        const paddedIndex = String(index + 1).padStart(2, "0");
+        return `gpt-image-${paddedIndex}.png`;
+      }
+
+      async function prepareResultImages(images) {
+        return Promise.all((images || []).map((image) => readResultImageMetadata(image)));
+      }
+
+      async function readResultImageMetadata(image) {
+        if (!image?.dataUrl) {
+          return image;
+        }
+        const source = await loadImageElement(image.dataUrl);
+        return {
+          ...image,
+          naturalWidth: source.naturalWidth || source.width,
+          naturalHeight: source.naturalHeight || source.height
+        };
+      }
+
+      function createScreenFromResultImage(image, fallback) {
+        const width = Math.round(image?.naturalWidth || fallback.width);
+        const height = Math.round(image?.naturalHeight || fallback.height);
+        return {
+          name: fallback.name,
+          width,
+          height
+        };
+      }
+
+      function loadImageElement(dataUrl) {
+        return new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => reject(new Error("结果图加载失败"));
+          image.src = dataUrl;
+        });
+      }
+
+      function isEmbeddedPluginHost() {
+        return Boolean(window.parent && window.parent !== window);
+      }
+
+      function attachPreviewFit(image, frame) {
+        if (!image || !frame) {
+          return;
+        }
+        if (previewFrameObserver) {
+          previewFrameObserver.disconnect();
+          previewFrameObserver = null;
+        }
+        if (typeof ResizeObserver !== "undefined") {
+          previewFrameObserver = new ResizeObserver(() => {
+            schedulePreviewFit(image, frame);
+          });
+          previewFrameObserver.observe(frame);
+        }
+        if (image.complete) {
+          schedulePreviewFit(image, frame);
+        } else {
+          image.addEventListener("load", () => schedulePreviewFit(image, frame), { once: true });
+        }
+      }
+
+      function schedulePreviewFit(image, frame) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            applyPreviewFit(image, frame);
+          });
+        });
+      }
+
+      function applyPreviewFit(image, frame) {
+        if (!image || !frame) {
+          return;
+        }
+        const naturalWidth = image.naturalWidth;
+        const naturalHeight = image.naturalHeight;
+        const frameStyle = window.getComputedStyle(frame);
+        const horizontalPadding = parseFloat(frameStyle.paddingLeft || "0") + parseFloat(frameStyle.paddingRight || "0");
+        const availableWidth = frame.clientWidth - horizontalPadding;
+        if (!naturalWidth || !naturalHeight || !availableWidth) {
+          return;
+        }
+        const scale = Math.min(availableWidth / naturalWidth, 1.4);
+        image.style.width = `${Math.floor(naturalWidth * scale)}px`;
+        image.style.height = `${Math.floor(naturalHeight * scale)}px`;
+        const card = image.closest(".result-card");
+        const layer = card?.querySelector(".slice-layer");
+        renderSliceOverlay(card, layer, image);
+      }
+
+      async function triggerImageDownload(dataUrl, filename) {
+        if (!dataUrl) {
+          setStatus("当前图片没有可下载的数据。", true);
+          return;
+        }
+        try {
+          const response = await fetch(dataUrl);
+          const blob = await response.blob();
+          triggerBlobDownload(blob, filename);
+        } catch (error) {
+          setStatus(`下载失败：${readErrorMessage(error)}`, true);
+        }
+      }
+
+      function triggerBlobDownload(blob, filename) {
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = filename;
+        link.rel = "noopener";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      }
+
+      function textToUint8Array(text) {
+        return new TextEncoder().encode(text);
+      }
+
+      function dataUrlToUint8Array(dataUrl) {
+        const commaIndex = dataUrl.indexOf(",");
+        if (commaIndex === -1) {
+          throw new Error("Invalid data URL");
+        }
+        const base64 = dataUrl.slice(commaIndex + 1);
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+        return bytes;
+      }
+
+      function createZipBlob(files) {
+        const localParts = [];
+        const centralParts = [];
+        let offset = 0;
+        files.forEach((file) => {
+          const filename = textToUint8Array(file.name);
+          const data = file.data;
+          const crc = crc32(data);
+          const localHeader = createZipLocalHeader(filename, data.length, crc);
+          localParts.push(localHeader, data);
+          centralParts.push(createZipCentralHeader(filename, data.length, crc, offset));
+          offset += localHeader.length + data.length;
+        });
+        const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+        const endRecord = createZipEndRecord(files.length, centralSize, offset);
+        return new Blob([...localParts, ...centralParts, endRecord], { type: "application/zip" });
+      }
+
+      function createZipLocalHeader(filename, size, crc) {
+        const header = new Uint8Array(30 + filename.length);
+        const view = new DataView(header.buffer);
+        view.setUint32(0, 0x04034b50, true);
+        view.setUint16(4, 20, true);
+        view.setUint16(6, 0, true);
+        view.setUint16(8, 0, true);
+        view.setUint16(10, getDosTime(), true);
+        view.setUint16(12, getDosDate(), true);
+        view.setUint32(14, crc, true);
+        view.setUint32(18, size, true);
+        view.setUint32(22, size, true);
+        view.setUint16(26, filename.length, true);
+        header.set(filename, 30);
+        return header;
+      }
+
+      function createZipCentralHeader(filename, size, crc, offset) {
+        const header = new Uint8Array(46 + filename.length);
+        const view = new DataView(header.buffer);
+        view.setUint32(0, 0x02014b50, true);
+        view.setUint16(4, 20, true);
+        view.setUint16(6, 20, true);
+        view.setUint16(8, 0, true);
+        view.setUint16(10, 0, true);
+        view.setUint16(12, getDosTime(), true);
+        view.setUint16(14, getDosDate(), true);
+        view.setUint32(16, crc, true);
+        view.setUint32(20, size, true);
+        view.setUint32(24, size, true);
+        view.setUint16(28, filename.length, true);
+        view.setUint32(42, offset, true);
+        header.set(filename, 46);
+        return header;
+      }
+
+      function createZipEndRecord(fileCount, centralSize, centralOffset) {
+        const record = new Uint8Array(22);
+        const view = new DataView(record.buffer);
+        view.setUint32(0, 0x06054b50, true);
+        view.setUint16(8, fileCount, true);
+        view.setUint16(10, fileCount, true);
+        view.setUint32(12, centralSize, true);
+        view.setUint32(16, centralOffset, true);
+        return record;
+      }
+
+      function crc32(bytes) {
+        let crc = 0xffffffff;
+        for (let index = 0; index < bytes.length; index += 1) {
+          crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ bytes[index]) & 0xff];
+        }
+        return (crc ^ 0xffffffff) >>> 0;
+      }
+
+      const CRC32_TABLE = (() => {
+        const table = new Uint32Array(256);
+        for (let index = 0; index < 256; index += 1) {
+          let value = index;
+          for (let bit = 0; bit < 8; bit += 1) {
+            value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+          }
+          table[index] = value >>> 0;
+        }
+        return table;
+      })();
+
+      function getDosTime() {
+        const now = new Date();
+        return (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+      }
+
+      function getDosDate() {
+        const now = new Date();
+        return ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+      }
+
+      function sanitizeFilename(value) {
+        return String(value || "asset")
+          .trim()
+          .replace(/[\\/:*?"<>|]+/g, "_")
+          .replace(/\s+/g, "_")
+          .slice(0, 80) || "asset";
+      }
+
+      function createTransparentAssetPng(width, height, kind) {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        context.clearRect(0, 0, width, height);
+        context.lineCap = "round";
+        context.lineJoin = "round";
+
+        if (kind === "illustration") {
+          context.fillStyle = "#5dd6c6";
+          context.beginPath();
+          context.arc(width * 0.5, height * 0.48, width * 0.34, 0, Math.PI * 2);
+          context.fill();
+          context.fillStyle = "#f6f7fb";
+          context.beginPath();
+          context.arc(width * 0.58, height * 0.28, width * 0.12, 0, Math.PI * 2);
+          context.fill();
+          context.strokeStyle = "#17202a";
+          context.lineWidth = 8;
+          context.beginPath();
+          context.moveTo(width * 0.54, height * 0.42);
+          context.lineTo(width * 0.38, height * 0.58);
+          context.lineTo(width * 0.28, height * 0.78);
+          context.moveTo(width * 0.44, height * 0.54);
+          context.lineTo(width * 0.66, height * 0.66);
+          context.lineTo(width * 0.78, height * 0.82);
+          context.stroke();
+          return canvas.toDataURL("image/png");
+        }
+
+        context.strokeStyle = "#17202a";
+        context.lineWidth = 7;
+        if (kind === "home") {
+          context.beginPath();
+          context.moveTo(width * 0.2, height * 0.48);
+          context.lineTo(width * 0.5, height * 0.22);
+          context.lineTo(width * 0.8, height * 0.48);
+          context.lineTo(width * 0.8, height * 0.78);
+          context.lineTo(width * 0.28, height * 0.78);
+          context.lineTo(width * 0.28, height * 0.48);
+          context.stroke();
+        } else if (kind === "bolt") {
+          context.fillStyle = "#17202a";
+          context.beginPath();
+          context.moveTo(width * 0.55, height * 0.12);
+          context.lineTo(width * 0.24, height * 0.54);
+          context.lineTo(width * 0.48, height * 0.54);
+          context.lineTo(width * 0.4, height * 0.88);
+          context.lineTo(width * 0.76, height * 0.44);
+          context.lineTo(width * 0.52, height * 0.44);
+          context.closePath();
+          context.fill();
+        } else {
+          context.beginPath();
+          context.arc(width * 0.5, height * 0.34, width * 0.16, 0, Math.PI * 2);
+          context.moveTo(width * 0.22, height * 0.82);
+          context.quadraticCurveTo(width * 0.5, height * 0.56, width * 0.78, height * 0.82);
+          context.stroke();
+        }
+
+        return canvas.toDataURL("image/png");
+      }
+
+      function applyRatio(ratio) {
+        const presets = {
+          "1:1": [1024, 1024],
+          "16:9": [1920, 1080],
+          "4:3": [1600, 1200],
+          "3:4": [1200, 1600],
+          "9:16": [390, 844]
+        };
+        if (presets[ratio]) {
+          widthInput.value = presets[ratio][0];
+          heightInput.value = presets[ratio][1];
+        }
+      }
+
+      function updateCustomSizeVisibility() {
+        customSizeCard.classList.toggle("hidden", currentRatio !== "custom");
+        sidebar.classList.toggle("custom-mode", currentRatio === "custom");
+      }
+
+      function updateModeVisibility() {
+        const isImageToImage = currentMode === "image-to-image";
+        sidebar.classList.toggle("image-mode", isImageToImage);
+        referenceSection.classList.toggle("hidden", !isImageToImage || referenceImages.length === 0);
+        promptBox.classList.toggle("with-reference", isImageToImage);
+        promptInput.placeholder = isImageToImage ? "粘贴参考图后，输入提示词..." : "描述你想生成的 UI App 界面";
+        if (isImageToImage && referenceImages.length === 0) {
+          setStatus("可以直接粘贴或拖拽多张参考图。");
+        }
+      }
+
+      async function addReferenceImages(files) {
+        const imageFiles = files.filter((file) => file && file.type && file.type.startsWith("image/")).slice(0, 16);
+        if (imageFiles.length === 0) {
+          setStatus("请粘贴或上传 PNG、JPG、WebP 图片。", true);
+          return;
+        }
+        const nextImages = await Promise.all(
+          imageFiles.map(async (file, index) => ({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${index}`,
+            name: file.name || `reference-${referenceImages.length + index + 1}.png`,
+            type: file.type || "image/png",
+            dataUrl: await fileToDataUrl(file)
+          }))
+        );
+        referenceImages = [...referenceImages, ...nextImages].slice(0, 16);
+        renderReferenceImages();
+        setStatus(`已添加 ${referenceImages.length} 张参考图，可以继续输入描述词生成。`);
+      }
+
+      function removeReferenceImage(index) {
+        referenceImages.splice(index, 1);
+        renderReferenceImages();
+      }
+
+      function renderReferenceImages() {
+        referenceSection.classList.toggle("hidden", currentMode !== "image-to-image" || referenceImages.length === 0);
+        referenceDrop.classList.toggle("has-image", referenceImages.length > 0);
+        referenceDrop.classList.toggle("empty", referenceImages.length === 0);
+        const compactImages = referenceImages.slice(0, 4);
+        const overflowCount = Math.max(referenceImages.length - compactImages.length, 0);
+        referenceSection.classList.toggle("has-overflow", overflowCount > 0);
+        referencePopover.hidden = overflowCount === 0;
+        referenceChips.innerHTML = compactImages
+          .map(
+            (image, index) => `
+              <span class="reference-chip">
+                <img class="reference-preview" src="${image.dataUrl}" alt="${escapeHtml(image.name)}" />
+                <span class="reference-info">
+                  <strong>${escapeHtml(image.name)}</strong>
+                </span>
+                <button class="reference-clear" type="button" aria-label="移除 ${escapeHtml(image.name)}" data-remove-reference="${index}">×</button>
+              </span>
+            `
+          )
+          .join("");
+        if (overflowCount > 0) {
+          referenceChips.insertAdjacentHTML(
+            "beforeend",
+            `<span class="reference-chip more">+${overflowCount}</span>`
+          );
+        }
+        referencePopoverGrid.innerHTML = referenceImages
+          .map(
+            (image, index) => `
+              <span class="reference-chip">
+                <img class="reference-preview" src="${image.dataUrl}" alt="${escapeHtml(image.name)}" />
+                <span class="reference-info">
+                  <strong>${escapeHtml(image.name)}</strong>
+                </span>
+                <button class="reference-clear" type="button" aria-label="移除 ${escapeHtml(image.name)}" data-remove-reference="${index}">×</button>
+              </span>
+            `
+          )
+          .join("");
+        if (referenceImages.length === 0) {
+          setStatus("可以直接粘贴或拖拽多张参考图。");
+        }
+      }
+
+      function getImagesFromClipboard(clipboardData) {
+        if (!clipboardData || !clipboardData.items) {
+          return [];
+        }
+        const files = [];
+        for (const item of clipboardData.items) {
+          if (item.kind === "file" && item.type.startsWith("image/")) {
+            const file = item.getAsFile();
+            if (file) {
+              files.push(file);
+            }
+          }
+        }
+        return files;
+      }
+
+      function syncProviderFieldsFromStorage() {
+        const defaults = PROVIDER_DEFAULTS[activeProvider];
+        providerBaseUrl = safeStorageGet(providerStorageKey(activeProvider, "base-url")) || defaults.baseUrl;
+        providerBaseUrlInput.value = providerBaseUrl;
+        apiModelInput.value = normalizeProviderModel(activeProvider, safeStorageGet(providerStorageKey(activeProvider, "model")) || defaults.model);
+        apiKeyInput.value = "";
+        apiKeyInput.placeholder = safeStorageGet(providerStorageKey(activeProvider, "has-key")) === "true" ? "已保存，已隐藏" : "sk-...";
+        providerOptionButtons.forEach((button) => {
+          button.classList.toggle("active", button.dataset.provider === activeProvider);
+        });
+      }
+
+      async function switchProvider(provider) {
+        if (!PROVIDER_DEFAULTS[provider]) {
+          return;
+        }
+        activeProvider = provider;
+        safeStorageSet("ai-ui-active-provider", activeProvider);
+        syncProviderFieldsFromStorage();
+        apiConfigStatus.textContent = `已切换到${PROVIDER_DEFAULTS[activeProvider].label}，保存配置后生效。`;
+      }
+
+      async function saveApiConfig() {
+        providerBaseUrl = providerBaseUrlInput.value.trim().replace(/\/$/, "");
+        const model = normalizeProviderModel(activeProvider, apiModelInput.value.trim());
+        const apiKey = apiKeyInput.value.trim();
+        safeStorageSet(providerStorageKey(activeProvider, "base-url"), providerBaseUrl);
+        safeStorageSet(providerStorageKey(activeProvider, "model"), model);
+
+        apiConfigStatus.textContent = "正在保存配置...";
+        try {
+          const response = await fetch(`${PROXY_BASE_URL}/api/config`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({
+              provider: activeProvider,
+              baseUrl: providerBaseUrl,
+              model,
+              apiKey
+            })
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(readErrorMessage(data, `保存失败：${response.status}`));
+          }
+          apiKeyInput.value = "";
+          apiKeyInput.placeholder = data.hasApiKey ? "已保存，已隐藏" : "sk-...";
+          safeStorageSet(providerStorageKey(activeProvider, "has-key"), data.hasApiKey ? "true" : "false");
+          apiConfigStatus.textContent = data.hasApiKey ? `已保存：${PROVIDER_DEFAULTS[activeProvider].label} · ${data.baseUrl} · ${data.model}` : `已保存模型：${data.model}，但还没有 API Key`;
+        } catch (error) {
+          apiConfigStatus.textContent = `保存失败：${readNetworkErrorMessage(error)}`;
+        }
+      }
+
+      async function loadApiConfigFromBackend() {
+        try {
+          const response = await fetch(`${PROXY_BASE_URL}/api/config`);
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(readErrorMessage(data, `加载配置失败：${response.status}`));
+          }
+          if (typeof data.activeProvider === "string" && PROVIDER_DEFAULTS[data.activeProvider]) {
+            activeProvider = data.activeProvider;
+            safeStorageSet("ai-ui-active-provider", activeProvider);
+          }
+          if (data.providers && typeof data.providers === "object") {
+            Object.entries(data.providers).forEach(([provider, config]) => {
+              if (!PROVIDER_DEFAULTS[provider] || !config) {
+                return;
+              }
+              if (typeof config.baseUrl === "string" && config.baseUrl.trim()) {
+                safeStorageSet(providerStorageKey(provider, "base-url"), config.baseUrl.trim());
+              }
+              if (typeof config.model === "string" && config.model.trim()) {
+                safeStorageSet(providerStorageKey(provider, "model"), normalizeProviderModel(provider, config.model));
+              }
+              safeStorageSet(providerStorageKey(provider, "has-key"), config.hasApiKey ? "true" : "false");
+            });
+          }
+          if (typeof data.baseUrl === "string" && data.baseUrl.trim()) {
+            providerBaseUrl = data.baseUrl.trim();
+            providerBaseUrlInput.value = providerBaseUrl;
+            safeStorageSet(providerStorageKey(activeProvider, "base-url"), providerBaseUrl);
+          }
+          if (typeof data.model === "string" && data.model.trim()) {
+            apiModelInput.value = normalizeProviderModel(activeProvider, data.model);
+            safeStorageSet(providerStorageKey(activeProvider, "model"), apiModelInput.value);
+          }
+          safeStorageSet(providerStorageKey(activeProvider, "has-key"), data.hasApiKey ? "true" : "false");
+          apiKeyInput.placeholder = data.hasApiKey ? "已保存，已隐藏" : "sk-...";
+          syncProviderFieldsFromStorage();
+        } catch (error) {
+          console.warn("Failed to load API config from backend:", error);
+        }
+      }
+
+      function normalizeProviderModel(provider, value) {
+        if (provider === "openrouter") {
+          return PROVIDER_DEFAULTS.openrouter.model;
+        }
+        return value && String(value).trim() ? String(value).trim() : PROVIDER_DEFAULTS[provider].model;
+      }
+
+      async function testApiConnection() {
+        providerBaseUrl = providerBaseUrlInput.value.trim().replace(/\/$/, "");
+        safeStorageSet(providerStorageKey(activeProvider, "base-url"), providerBaseUrl);
+        apiConfigStatus.textContent = "正在测试连接...";
+        try {
+          const response = await fetch(`${PROXY_BASE_URL}/health`);
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(readErrorMessage(data, `连接失败：${response.status}`));
+          }
+          apiConfigStatus.textContent = data.hasApiKey ? `连接正常：${data.baseUrl} · ${data.model}` : `连接正常，但本地后端还没有保存 API Key`;
+        } catch (error) {
+          apiConfigStatus.textContent = `连接失败：${readNetworkErrorMessage(error)}`;
+        }
+      }
+
+      function scalePlacement(base, screen) {
+        const scaleX = screen.width / 390;
+        const scaleY = screen.height / 844;
+        return {
+          x: Math.round(base.x * scaleX),
+          y: Math.round(base.y * scaleY),
+          width: Math.round(base.width * scaleX),
+          height: Math.round(base.height * scaleY)
+        };
+      }
+
+      function drawRoundRect(context, x, y, width, height, radius, color) {
+        context.fillStyle = color;
+        context.beginPath();
+        context.roundRect(x, y, width, height, radius);
+        context.fill();
+      }
+
+      function syncCharacterCount() {
+        charCount.textContent = `${promptInput.value.length} / 1000`;
+      }
+
+      function setBusy(isBusy, message) {
+        generateButton.disabled = isBusy;
+        generateButton.textContent = isBusy ? "生成中..." : "生成设计稿";
+        if (message) {
+          setStatus(message);
+        }
+      }
+
+      function setStatus(message, isError = false) {
+        status.textContent = message;
+        status.classList.toggle("error", isError);
+      }
+
+      function clampNumber(value, min, max, fallback) {
+        if (!Number.isFinite(value)) {
+          return fallback;
+        }
+        return Math.min(max, Math.max(min, value));
+      }
+
+      function readErrorMessage(value, fallback = "未知错误") {
+        if (!value) {
+          return fallback;
+        }
+        if (typeof value === "string") {
+          return value;
+        }
+        if (value.message && typeof value.message === "string") {
+          return value.message;
+        }
+        if (value.error && typeof value.error === "string") {
+          return value.error;
+        }
+        if (value.error && value.error.message) {
+          return value.error.message;
+        }
+        try {
+          return JSON.stringify(value);
+        } catch {
+          return fallback;
+        }
+      }
+
+      function readNetworkErrorMessage(error) {
+        const message = readErrorMessage(error);
+        if (/failed to fetch|networkerror|load failed/i.test(message)) {
+          return "本地后端未启动或无法连接，请先运行 npm run api，再重新保存";
+        }
+        return message;
+      }
+
+      function fileToDataUrl(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error || new Error("读取图片失败"));
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (character) => {
+          return {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            "\"": "&quot;",
+            "'": "&#039;"
+          }[character];
+        });
+      }
+    </script>
+  </body>
+</html>

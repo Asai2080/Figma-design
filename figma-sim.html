@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Figma Plugin Simulator</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #eef0f4;
+        color: #23262f;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .sim {
+        display: grid;
+        grid-template-columns: 980px minmax(320px, 1fr);
+        gap: 20px;
+        align-items: start;
+        padding: 24px;
+      }
+
+      .plugin-window,
+      .canvas-panel {
+        overflow: hidden;
+        border: 1px solid #d8dbe3;
+        border-radius: 10px;
+        background: #ffffff;
+        box-shadow: 0 20px 44px rgba(30, 35, 55, 0.14);
+      }
+
+      .plugin-window {
+        width: 980px;
+        height: 700px;
+      }
+
+      iframe {
+        display: block;
+        width: 980px;
+        height: 700px;
+        border: 0;
+      }
+
+      .canvas-panel {
+        min-height: 700px;
+        padding: 16px;
+      }
+
+      .canvas-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.3;
+      }
+
+      .status {
+        color: #777d8a;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .canvas-stage {
+        position: relative;
+        display: grid;
+        place-items: center;
+        min-height: 620px;
+        overflow: hidden;
+        border: 1px dashed #c9ccd6;
+        border-radius: 8px;
+        background: #f7f8fb;
+      }
+
+      .mock-frame {
+        position: relative;
+        overflow: hidden;
+        border-radius: 12px;
+        background: #ffffff;
+        box-shadow: 0 10px 28px rgba(20, 24, 36, 0.18);
+      }
+
+      .mock-frame > img,
+      .asset {
+        position: absolute;
+        display: block;
+      }
+
+      .asset {
+        outline: 1px solid rgba(118, 87, 255, 0.7);
+        outline-offset: 2px;
+      }
+
+      .empty {
+        max-width: 260px;
+        color: #8a8f9c;
+        font-size: 13px;
+        line-height: 1.55;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="sim">
+      <section class="plugin-window" aria-label="插件窗口">
+        <iframe src="./ui.html?v=20260430-repair-5" title="AI Image Generator plugin"></iframe>
+      </section>
+
+      <aside class="canvas-panel" aria-label="模拟 Figma 画布">
+        <div class="canvas-head">
+          <h1>模拟 Figma 画布</h1>
+          <div id="status" class="status">等待插件消息</div>
+        </div>
+        <div id="stage" class="canvas-stage">
+          <div class="empty">点击插件里的“生成图片”，再点“放入 Figma”，这里会显示 mock 的画布回填效果。</div>
+        </div>
+      </aside>
+    </main>
+
+    <script>
+      const stage = document.getElementById("stage");
+      const status = document.getElementById("status");
+
+      window.addEventListener("message", (event) => {
+        const message = event.data && event.data.pluginMessage;
+        if (!message) {
+          return;
+        }
+
+        if (message.type === "close") {
+          status.textContent = "收到关闭消息";
+          return;
+        }
+
+        if (message.type === "create-ui-asset-screen") {
+          renderManifest(message.manifest);
+        }
+      });
+
+      function renderManifest(manifest) {
+        const maxWidth = stage.clientWidth - 44;
+        const maxHeight = stage.clientHeight - 44;
+        const scale = Math.min(maxWidth / manifest.screen.width, maxHeight / manifest.screen.height, 1);
+        const frameWidth = Math.round(manifest.screen.width * scale);
+        const frameHeight = Math.round(manifest.screen.height * scale);
+
+        stage.innerHTML = "";
+        const frame = document.createElement("div");
+        frame.className = "mock-frame";
+        frame.style.width = `${frameWidth}px`;
+        frame.style.height = `${frameHeight}px`;
+
+        const preview = document.createElement("img");
+        preview.src = manifest.previewImage.dataUrl;
+        preview.style.left = "0";
+        preview.style.top = "0";
+        preview.style.width = `${frameWidth}px`;
+        preview.style.height = `${frameHeight}px`;
+        frame.appendChild(preview);
+
+        for (const asset of manifest.assets.filter((item) => item.selected !== false)) {
+          const image = document.createElement("img");
+          image.className = "asset";
+          image.src = asset.dataUrl;
+          image.title = asset.name;
+          image.style.left = `${Math.round(asset.placement.x * scale)}px`;
+          image.style.top = `${Math.round(asset.placement.y * scale)}px`;
+          image.style.width = `${Math.round(asset.placement.width * scale)}px`;
+          image.style.height = `${Math.round(asset.placement.height * scale)}px`;
+          frame.appendChild(image);
+        }
+
+        stage.appendChild(frame);
+        status.textContent = `${manifest.assets.filter((item) => item.selected !== false).length} 个透明 PNG 已回填`;
+      }
+    </script>
+  </body>
+</html>

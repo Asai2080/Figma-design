@@ -1,0 +1,12 @@
+{
+  "name": "ai-ui-asset-generator",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "api": "node server.js",
+    "preview": "python3 -m http.server 4173 --bind 127.0.0.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
