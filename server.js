@@ -33,7 +33,7 @@ let openaiBaseUrl = providerConfigs[activeProvider].baseUrl || process.env.OPENA
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
   "access-control-allow-headers": "content-type,authorization"
 };
 const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 300000);
@@ -96,6 +96,31 @@ const server = http.createServer(async (request, response) => {
         model: openaiImageModel,
         hasApiKey: Boolean(openaiApiKey),
         persisted: true
+      });
+      return;
+    }
+
+    if (request.method === "DELETE" && request.url === "/api/config") {
+      const payload = await readJson(request);
+      const provider = PROVIDER_DEFAULTS[payload.provider] ? payload.provider : activeProvider;
+      const defaults = PROVIDER_DEFAULTS[provider];
+      activeProvider = provider;
+      providerConfigs[provider] = {
+        baseUrl: defaults.baseUrl,
+        model: defaults.model,
+        apiKey: ""
+      };
+      openaiBaseUrl = providerConfigs[provider].baseUrl;
+      openaiImageModel = providerConfigs[provider].model;
+      openaiApiKey = "";
+      saveLocalConfig();
+      sendJson(response, 200, {
+        ok: true,
+        activeProvider,
+        baseUrl: openaiBaseUrl,
+        model: openaiImageModel,
+        hasApiKey: false,
+        cleared: true
       });
       return;
     }

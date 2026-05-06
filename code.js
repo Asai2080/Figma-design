@@ -1,4 +1,13 @@
-figma.showUI(__html__, { width: 980, height: 700, themeColors: true });
+const DEFAULT_UI_WINDOW = { width: 980, height: 700 };
+const MIN_UI_WINDOW = { width: 360, height: 240 };
+const COLLAPSED_UI_WINDOW = { width: 320, height: 72 };
+const UI_WINDOW_STORAGE_KEY = "ai-ui-window-state-v2";
+
+figma.showUI(__html__, { width: DEFAULT_UI_WINDOW.width, height: DEFAULT_UI_WINDOW.height, themeColors: true });
+
+restoreUiWindowState().catch((error) => {
+  notifyRecoverableError("窗口状态恢复失败", error);
+});
 
 figma.ui.onmessage = async (message) => {
   try {
@@ -8,7 +17,15 @@ figma.ui.onmessage = async (message) => {
     }
 
     if (message.type === "resize-ui") {
-      figma.ui.resize(message.width, message.height);
+      safeResizeUi(message.width, message.height);
+    }
+
+    if (message.type === "save-ui-window-state") {
+      await saveUiWindowState(message.state);
+    }
+
+    if (message.type === "set-ui-collapsed") {
+      await setUiCollapsed(Boolean(message.collapsed));
     }
 
     if (message.type === "close") {
@@ -17,9 +34,114 @@ figma.ui.onmessage = async (message) => {
   } catch (error) {
     const reason = error && error.message ? error.message : String(error);
     figma.notify(`生成失败：${reason}`, { error: true });
-    figma.ui.postMessage({ type: "generation-error", message: reason });
+    safePostMessage({ type: "generation-error", message: reason });
   }
 };
+
+async function restoreUiWindowState() {
+  const state = await getStoredUiWindowState();
+  const nextSize = state.collapsed ? COLLAPSED_UI_WINDOW : normalizeUiSize(state.width, state.height);
+  safeResizeUi(nextSize.width, nextSize.height, state.collapsed);
+  safePostMessage({
+    type: "ui-window-state",
+    state: {
+      width: nextSize.width,
+      height: nextSize.height,
+      collapsed: Boolean(state.collapsed)
+    }
+  });
+}
+
+async function setUiCollapsed(collapsed) {
+  const previous = await getStoredUiWindowState();
+  const normalSize = normalizeUiSize(previous.width, previous.height);
+  const nextSize = collapsed ? COLLAPSED_UI_WINDOW : normalSize;
+  const nextState = {
+    width: normalSize.width,
+    height: normalSize.height,
+    collapsed
+  };
+  await figma.clientStorage.setAsync(UI_WINDOW_STORAGE_KEY, nextState);
+  safeResizeUi(nextSize.width, nextSize.height, collapsed);
+  safePostMessage({
+    type: "ui-window-state",
+    state: {
+      width: nextSize.width,
+      height: nextSize.height,
+      collapsed: Boolean(nextState.collapsed)
+    }
+  });
+}
+
+async function saveUiWindowState(state) {
+  const previous = await getStoredUiWindowState();
+  const size = normalizeUiSize(state && state.width, state && state.height);
+  const nextState = {
+    width: size.width,
+    height: size.height,
+    collapsed: Boolean(state && Object.prototype.hasOwnProperty.call(state, "collapsed") ? state.collapsed : previous.collapsed)
+  };
+  await figma.clientStorage.setAsync(UI_WINDOW_STORAGE_KEY, nextState);
+}
+
+async function getStoredUiWindowState() {
+  const stored = await figma.clientStorage.getAsync(UI_WINDOW_STORAGE_KEY).catch(() => null);
+  if (!stored || typeof stored !== "object") {
+    return {
+      width: DEFAULT_UI_WINDOW.width,
+      height: DEFAULT_UI_WINDOW.height,
+      collapsed: false
+    };
+  }
+
+  const size = normalizeUiSize(stored.width, stored.height);
+  return {
+    width: size.width,
+    height: size.height,
+    collapsed: Boolean(stored.collapsed)
+  };
+}
+
+function normalizeUiSize(width, height) {
+  return {
+    width: clampNumber(Number(width), MIN_UI_WINDOW.width, 2200, DEFAULT_UI_WINDOW.width),
+    height: clampNumber(Number(height), MIN_UI_WINDOW.height, 1600, DEFAULT_UI_WINDOW.height)
+  };
+}
+
+function clampNumber(value, min, max, fallback) {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function safeResizeUi(width, height, allowCollapsed) {
+  const size = allowCollapsed
+    ? {
+        width: clampNumber(Number(width), COLLAPSED_UI_WINDOW.width, 2200, COLLAPSED_UI_WINDOW.width),
+        height: clampNumber(Number(height), COLLAPSED_UI_WINDOW.height, 1600, COLLAPSED_UI_WINDOW.height)
+      }
+    : normalizeUiSize(width, height);
+  try {
+    figma.ui.resize(size.width, size.height);
+  } catch (error) {
+    notifyRecoverableError("窗口尺寸调整失败", error);
+  }
+}
+
+function safePostMessage(message) {
+  try {
+    figma.ui.postMessage(message);
+  } catch (error) {
+    notifyRecoverableError("消息同步失败", error);
+  }
+}
+
+function notifyRecoverableError(prefix, error) {
+  const reason = error && error.message ? error.message : String(error);
+  console.warn(`${prefix}: ${reason}`);
+}
 
 async function createUiAssetScreen(manifest) {
   validateManifest(manifest);

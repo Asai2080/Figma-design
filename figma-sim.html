@@ -19,7 +19,7 @@
 
       .sim {
         display: grid;
-        grid-template-columns: 980px minmax(320px, 1fr);
+        grid-template-columns: var(--plugin-width, 980px) minmax(320px, 1fr);
         gap: 20px;
         align-items: start;
         padding: 24px;
@@ -41,8 +41,8 @@
 
       iframe {
         display: block;
-        width: 980px;
-        height: 700px;
+        width: 100%;
+        height: 100%;
         border: 0;
       }
 
@@ -113,7 +113,7 @@
   <body>
     <main class="sim">
       <section class="plugin-window" aria-label="插件窗口">
-        <iframe src="./ui.html?v=20260430-repair-5" title="AI Image Generator plugin"></iframe>
+        <iframe src="./ui.html?v=20260506-v2-window-1" title="AI Image Generator plugin"></iframe>
       </section>
 
       <aside class="canvas-panel" aria-label="模拟 Figma 画布">
@@ -130,6 +130,14 @@
     <script>
       const stage = document.getElementById("stage");
       const status = document.getElementById("status");
+      const sim = document.querySelector(".sim");
+      const pluginWindow = document.querySelector(".plugin-window");
+      const pluginFrame = document.querySelector("iframe");
+      const UI_WINDOW_STORAGE_KEY = "ai-ui-window-state-v2";
+      const DEFAULT_UI_WINDOW = { width: 980, height: 700 };
+      const COLLAPSED_UI_WINDOW = { width: 320, height: 72 };
+
+      restorePluginWindowState();
 
       window.addEventListener("message", (event) => {
         const message = event.data && event.data.pluginMessage;
@@ -142,10 +150,111 @@
           return;
         }
 
+        if (message.type === "resize-ui") {
+          resizePluginWindow(message.width, message.height);
+          return;
+        }
+
+        if (message.type === "save-ui-window-state") {
+          saveWindowState(message.state);
+          return;
+        }
+
+        if (message.type === "set-ui-collapsed") {
+          const state = readWindowState();
+          const nextState = {
+            width: state.width,
+            height: state.height,
+            collapsed: Boolean(message.collapsed)
+          };
+          saveWindowState(nextState);
+          const nextSize = nextState.collapsed ? COLLAPSED_UI_WINDOW : nextState;
+          resizePluginWindow(nextSize.width, nextSize.height);
+          pluginFrame.contentWindow?.postMessage(
+            {
+              pluginMessage: {
+                type: "ui-window-state",
+                state: {
+                  ...nextState,
+                  width: nextSize.width,
+                  height: nextSize.height
+                }
+              }
+            },
+            "*"
+          );
+          return;
+        }
+
         if (message.type === "create-ui-asset-screen") {
           renderManifest(message.manifest);
         }
       });
+
+      function restorePluginWindowState() {
+        const state = readWindowState();
+        const size = state.collapsed ? COLLAPSED_UI_WINDOW : state;
+        resizePluginWindow(size.width, size.height);
+        pluginFrame.addEventListener("load", () => {
+          pluginFrame.contentWindow?.postMessage(
+            {
+              pluginMessage: {
+                type: "ui-window-state",
+                state: {
+                  ...state,
+                  width: size.width,
+                  height: size.height
+                }
+              }
+            },
+            "*"
+          );
+        });
+      }
+
+      function resizePluginWindow(width, height) {
+        const nextWidth = clampNumber(Number(width), 320, 1600, DEFAULT_UI_WINDOW.width);
+        const nextHeight = clampNumber(Number(height), 72, 1200, DEFAULT_UI_WINDOW.height);
+        pluginWindow.style.width = `${nextWidth}px`;
+        pluginWindow.style.height = `${nextHeight}px`;
+        sim.style.setProperty("--plugin-width", `${nextWidth}px`);
+      }
+
+      function readWindowState() {
+        try {
+          const raw = window.localStorage.getItem(UI_WINDOW_STORAGE_KEY);
+          const state = raw ? JSON.parse(raw) : null;
+          if (state && typeof state === "object") {
+            return {
+              width: clampNumber(Number(state.width), 360, 1600, DEFAULT_UI_WINDOW.width),
+              height: clampNumber(Number(state.height), 240, 1200, DEFAULT_UI_WINDOW.height),
+              collapsed: Boolean(state.collapsed)
+            };
+          }
+        } catch {
+          // Ignore invalid simulator storage.
+        }
+        return { ...DEFAULT_UI_WINDOW, collapsed: false };
+      }
+
+      function saveWindowState(state) {
+        if (!state || typeof state !== "object") {
+          return;
+        }
+        const nextState = {
+          width: clampNumber(Number(state.width), 360, 1600, DEFAULT_UI_WINDOW.width),
+          height: clampNumber(Number(state.height), 240, 1200, DEFAULT_UI_WINDOW.height),
+          collapsed: Boolean(state.collapsed)
+        };
+        window.localStorage.setItem(UI_WINDOW_STORAGE_KEY, JSON.stringify(nextState));
+      }
+
+      function clampNumber(value, min, max, fallback) {
+        if (!Number.isFinite(value)) {
+          return fallback;
+        }
+        return Math.min(max, Math.max(min, Math.round(value)));
+      }
 
       function renderManifest(manifest) {
         const maxWidth = stage.clientWidth - 44;
