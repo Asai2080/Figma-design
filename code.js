@@ -165,20 +165,18 @@ async function createUiAssetScreen(manifest) {
 
   const selectedAssets = manifest.assets.filter((asset) => asset.selected !== false);
   for (const asset of selectedAssets) {
-    const node = await createImageRectangle({
-      name: asset.name,
-      imageDataUrl: asset.dataUrl,
-      width: asset.placement.width,
-      height: asset.placement.height
-    });
+    const node = await createAssetNode(asset);
 
     node.x = asset.placement.x;
     node.y = asset.placement.y;
+    const useSvgExport = Boolean(asset.svgData && node.type !== "RECTANGLE");
     node.exportSettings = [
-      {
-        format: "PNG",
-        constraint: { type: "SCALE", value: 1 }
-      }
+      useSvgExport
+        ? { format: "SVG" }
+        : {
+            format: "PNG",
+            constraint: { type: "SCALE", value: 1 }
+          }
     ];
     node.setPluginData("assetManifest", JSON.stringify(createPluginDataAssetManifest(asset)));
     frame.appendChild(node);
@@ -204,6 +202,38 @@ async function createImageRectangle({ name, imageDataUrl, width, height }) {
   return rectangle;
 }
 
+async function createAssetNode(asset) {
+  if (asset.svgData) {
+    try {
+      return createSvgAssetNode({
+        name: asset.name,
+        svgData: asset.svgData,
+        width: asset.placement.width,
+        height: asset.placement.height
+      });
+    } catch (error) {
+      notifyRecoverableError("SVG 回填失败，已回退 PNG", error);
+    }
+  }
+
+  return createImageRectangle({
+    name: asset.name,
+    imageDataUrl: asset.dataUrl,
+    width: asset.placement.width,
+    height: asset.placement.height
+  });
+}
+
+function createSvgAssetNode({ name, svgData, width, height }) {
+  if (typeof figma.createNodeFromSvg !== "function") {
+    throw new Error("当前 Figma 环境不支持创建 SVG 节点");
+  }
+  const node = figma.createNodeFromSvg(svgData);
+  node.name = name;
+  node.resize(width, height);
+  return node;
+}
+
 function createPluginDataAssetManifest(asset) {
   return {
     id: asset.id,
@@ -212,7 +242,8 @@ function createPluginDataAssetManifest(asset) {
     kind: asset.kind,
     placement: asset.placement,
     transparent: Boolean(asset.transparent),
-    selected: asset.selected !== false
+    selected: asset.selected !== false,
+    hasSvg: Boolean(asset.svgData)
   };
 }
 
@@ -248,8 +279,8 @@ function validateManifest(manifest) {
   }
 
   for (const asset of manifest.assets) {
-    if (!asset.name || !asset.placement || !asset.dataUrl) {
-      throw new Error("每个 asset 必须包含 name、placement、dataUrl");
+    if (!asset.name || !asset.placement || (!asset.dataUrl && !asset.svgData)) {
+      throw new Error("每个 asset 必须包含 name、placement、dataUrl 或 svgData");
     }
 
     const placement = asset.placement;

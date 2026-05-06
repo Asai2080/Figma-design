@@ -1205,7 +1205,7 @@
 
       .cut-item {
         display: grid;
-        grid-template-columns: 42px 1fr auto auto;
+        grid-template-columns: 42px 1fr auto auto auto;
         gap: 8px;
         align-items: center;
         min-width: 0;
@@ -1266,7 +1266,8 @@
         font-size: 16px;
       }
 
-      .cut-transparent {
+      .cut-transparent,
+      .cut-svg {
         display: grid;
         place-items: center;
         min-width: 44px;
@@ -1282,6 +1283,11 @@
       .cut-transparent.done {
         color: #1d7a46;
         background: #eaf7ef;
+      }
+
+      .cut-svg.done {
+        color: #6846d8;
+        background: #efebff;
       }
 
       .status {
@@ -2728,9 +2734,10 @@
             <img class="cut-thumb" src="${asset.dataUrl}" alt="${escapeHtml(asset.name)}" />
             <div class="cut-meta">
               <span class="cut-name">${index + 1}. ${escapeHtml(asset.name)}</span>
-              <span class="cut-size">${asset.placement.width} × ${asset.placement.height}${asset.transparent ? " · 透明 PNG" : ""}</span>
+              <span class="cut-size">${asset.placement.width} × ${asset.placement.height}${asset.transparent ? " · 透明 PNG" : ""}${asset.svgData ? " · SVG" : ""}</span>
             </div>
             <button class="cut-transparent${asset.transparent ? " done" : ""}" type="button" data-transparent-slice="${asset.id}">${asset.transparent ? "已透明" : "透明"}</button>
+            <button class="cut-svg${asset.svgData ? " done" : ""}" type="button" data-svg-slice="${asset.id}">${asset.svgData ? "SVG" : "转 SVG"}</button>
             <button class="cut-remove" type="button" aria-label="删除 ${escapeHtml(asset.name)}" data-remove-slice="${asset.id}">×</button>
           </div>
         `).join("");
@@ -2753,6 +2760,12 @@
           button.addEventListener("click", async (event) => {
             event.stopPropagation();
             await makeSliceTransparent(button.dataset.transparentSlice);
+          });
+        });
+        cutGrid.querySelectorAll("[data-svg-slice]").forEach((button) => {
+          button.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            await convertSliceToSvg(button.dataset.svgSlice);
           });
         });
       }
@@ -3026,6 +3039,7 @@
           transparent: false,
           selected: true,
           dataUrl,
+          svgData: null,
           ...repair
         };
         activeImage.sliceManifest.assets.push(asset);
@@ -3044,6 +3058,7 @@
         asset.dataUrl = await cropImageRegion(activeImage.dataUrl, asset.placement);
         Object.assign(asset, await createSliceRepairPatch(activeImage.dataUrl, asset.placement));
         asset.transparent = false;
+        asset.svgData = null;
       }
 
       async function makeSliceTransparent(id) {
@@ -3096,6 +3111,25 @@
         }
       }
 
+      async function convertSliceToSvg(id) {
+        const asset = getActiveSliceAsset(id);
+        if (!asset) {
+          return;
+        }
+        setBusy(true, `正在实验转换 SVG：${asset.name}`);
+        try {
+          asset.svgData = await rasterAssetToEditableSvg(asset.dataUrl, asset.placement.width, asset.placement.height);
+          activeSliceId = id;
+          renderActiveResult(currentManifest);
+          renderCutModules(currentManifest);
+          setStatus(`已生成实验 SVG：${asset.name}。复杂图片建议继续保留 PNG。`);
+        } catch (error) {
+          setStatus(`SVG 转换失败：${error.message || String(error)}`, true);
+        } finally {
+          setBusy(false);
+        }
+      }
+
       async function exportSlicePackage() {
         const activeImage = getActiveResultImage();
         ensureImageSliceState(activeImage);
@@ -3118,10 +3152,17 @@
           ];
 
           assets.forEach((asset, index) => {
+            const basename = sanitizeFilename(asset.name || `slice_${index + 1}`);
             files.push({
-              name: `assets/${sanitizeFilename(asset.name || `slice_${index + 1}`)}.png`,
+              name: `assets/${basename}.png`,
               data: dataUrlToUint8Array(asset.dataUrl)
             });
+            if (asset.svgData) {
+              files.push({
+                name: `assets/${basename}.svg`,
+                data: textToUint8Array(asset.svgData)
+              });
+            }
           });
 
           const zipBlob = createZipBlob(files);
@@ -3425,6 +3466,181 @@
         return canvas.toDataURL("image/png");
       }
 
+      async function rasterAssetToEditableSvg(dataUrl, fallbackWidth, fallbackHeight) {
+        const source = await loadImageElement(dataUrl);
+        const sourceWidth = source.naturalWidth || source.width || fallbackWidth;
+        const sourceHeight = source.naturalHeight || source.height || fallbackHeight;
+        const maxSampleSize = 128;
+        const scale = Math.min(1, maxSampleSize / Math.max(sourceWidth, sourceHeight));
+        const sampleWidth = Math.max(1, Math.round(sourceWidth * scale));
+        const sampleHeight = Math.max(1, Math.round(sourceHeight * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = sampleWidth;
+        canvas.height = sampleHeight;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
+        context.drawImage(source, 0, 0, sampleWidth, sampleHeight);
+        const imageData = context.getImageData(0, 0, sampleWidth, sampleHeight);
+        const pixels = imageData.data;
+        const trace = traceRasterMaskToSvgPaths(pixels, sampleWidth, sampleHeight);
+        if (!trace.paths.length) {
+          throw new Error("没有检测到可转换的非透明像素");
+        }
+
+        const width = Math.max(1, Math.round(fallbackWidth || sourceWidth));
+        const height = Math.max(1, Math.round(fallbackHeight || sourceHeight));
+        const scaleX = width / sampleWidth;
+        const scaleY = height / sampleHeight;
+        const body = trace.paths.map((points) => pointsToSvgPath(points, scaleX, scaleY)).join("");
+        return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><path d="${body}" fill="${trace.fill}" fill-rule="evenodd"/></svg>`;
+      }
+
+      function traceRasterMaskToSvgPaths(pixels, width, height) {
+        const background = sampleEdgeColor(pixels, width, height);
+        const mask = [];
+        let r = 0;
+        let g = 0;
+        let b = 0;
+        let count = 0;
+        for (let y = 0; y < height; y += 1) {
+          for (let x = 0; x < width; x += 1) {
+            const index = (y * width + x) * 4;
+            const alpha = pixels[index + 3];
+            const distance = colorDistance(pixels[index], pixels[index + 1], pixels[index + 2], background.r, background.g, background.b);
+            const isForeground = alpha > 40 && (alpha < 245 || distance > 30);
+            mask[y * width + x] = isForeground;
+            if (isForeground) {
+              r += pixels[index];
+              g += pixels[index + 1];
+              b += pixels[index + 2];
+              count += 1;
+            }
+          }
+        }
+
+        const edgeMap = new Map();
+        const addEdge = (x1, y1, x2, y2) => {
+          const key = `${x1},${y1}`;
+          if (!edgeMap.has(key)) {
+            edgeMap.set(key, []);
+          }
+          edgeMap.get(key).push({ x: x2, y: y2 });
+        };
+        const hasPixel = (x, y) => x >= 0 && y >= 0 && x < width && y < height && mask[y * width + x];
+        for (let y = 0; y < height; y += 1) {
+          for (let x = 0; x < width; x += 1) {
+            if (!hasPixel(x, y)) {
+              continue;
+            }
+            if (!hasPixel(x, y - 1)) {
+              addEdge(x, y, x + 1, y);
+            }
+            if (!hasPixel(x + 1, y)) {
+              addEdge(x + 1, y, x + 1, y + 1);
+            }
+            if (!hasPixel(x, y + 1)) {
+              addEdge(x + 1, y + 1, x, y + 1);
+            }
+            if (!hasPixel(x - 1, y)) {
+              addEdge(x, y + 1, x, y);
+            }
+          }
+        }
+
+        const paths = [];
+        while (edgeMap.size) {
+          const startKey = edgeMap.keys().next().value;
+          const [startX, startY] = startKey.split(",").map(Number);
+          const points = [{ x: startX, y: startY }];
+          let current = { x: startX, y: startY };
+          let guard = 0;
+          while (guard < width * height * 8) {
+            guard += 1;
+            const key = `${current.x},${current.y}`;
+            const nextList = edgeMap.get(key);
+            if (!nextList || !nextList.length) {
+              break;
+            }
+            const next = nextList.pop();
+            if (!nextList.length) {
+              edgeMap.delete(key);
+            }
+            points.push(next);
+            current = next;
+            if (current.x === startX && current.y === startY) {
+              break;
+            }
+          }
+          if (points.length > 3) {
+            paths.push(simplifySvgPoints(points, 1.2));
+          }
+        }
+
+        return {
+          fill: count ? rgbToHex(Math.round(r / count), Math.round(g / count), Math.round(b / count)) : "#111318",
+          paths
+        };
+      }
+
+      function pointsToSvgPath(points, scaleX, scaleY) {
+        if (!points.length) {
+          return "";
+        }
+        const [first, ...rest] = points;
+        return `M${formatSvgNumber(first.x * scaleX)} ${formatSvgNumber(first.y * scaleY)}${rest.map((point) => `L${formatSvgNumber(point.x * scaleX)} ${formatSvgNumber(point.y * scaleY)}`).join("")}Z`;
+      }
+
+      function simplifySvgPoints(points, tolerance) {
+        if (points.length <= 3) {
+          return points;
+        }
+        const closed = points[0].x === points[points.length - 1].x && points[0].y === points[points.length - 1].y;
+        const line = closed ? points.slice(0, -1) : points;
+        const simplified = simplifyPolyline(line, tolerance);
+        return closed ? [...simplified, simplified[0]] : simplified;
+      }
+
+      function simplifyPolyline(points, tolerance) {
+        if (points.length <= 2) {
+          return points;
+        }
+        let maxDistance = 0;
+        let splitIndex = 0;
+        const first = points[0];
+        const last = points[points.length - 1];
+        for (let index = 1; index < points.length - 1; index += 1) {
+          const distance = pointLineDistance(points[index], first, last);
+          if (distance > maxDistance) {
+            maxDistance = distance;
+            splitIndex = index;
+          }
+        }
+        if (maxDistance <= tolerance) {
+          return [first, last];
+        }
+        const before = simplifyPolyline(points.slice(0, splitIndex + 1), tolerance);
+        const after = simplifyPolyline(points.slice(splitIndex), tolerance);
+        return before.slice(0, -1).concat(after);
+      }
+
+      function pointLineDistance(point, start, end) {
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        if (dx === 0 && dy === 0) {
+          return Math.hypot(point.x - start.x, point.y - start.y);
+        }
+        return Math.abs(dy * point.x - dx * point.y + end.x * start.y - end.y * start.x) / Math.hypot(dx, dy);
+      }
+
+      function rgbToHex(r, g, b) {
+        return `#${[r, g, b].map((value) => clampNumber(value, 0, 255, 0).toString(16).padStart(2, "0")).join("")}`;
+      }
+
+      function formatSvgNumber(value) {
+        return Number(value.toFixed(2)).toString();
+      }
+
       function sampleEdgeStats(pixels, width, height) {
         const sideSamples = {
           top: [],
@@ -3581,7 +3797,9 @@
             id: asset.id,
             name: asset.name,
             filename,
+            svgFilename: asset.svgData ? filename.replace(/\.png$/, ".svg") : null,
             format: "png",
+            formats: asset.svgData ? ["png", "svg"] : ["png"],
             transparent: Boolean(asset.transparent),
             selectedImageIndex: imageIndex,
             placement: { ...asset.placement }
