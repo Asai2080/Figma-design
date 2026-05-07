@@ -29,6 +29,7 @@ let providerConfigs = normalizeProviderConfigs(localConfig);
 let openaiApiKey = providerConfigs[activeProvider].apiKey || process.env.OPENAI_API_KEY || "";
 let openaiImageModel = providerConfigs[activeProvider].model || process.env.OPENAI_IMAGE_MODEL || PROVIDER_DEFAULTS[activeProvider].model;
 let openaiBaseUrl = providerConfigs[activeProvider].baseUrl || process.env.OPENAI_BASE_URL || PROVIDER_DEFAULTS[activeProvider].baseUrl;
+let vectorizerModulePromise = null;
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -145,6 +146,13 @@ const server = http.createServer(async (request, response) => {
       requireApiKey();
       const payload = await readJson(request);
       const result = await generateTransparentAsset(payload);
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/assets/vectorize") {
+      const payload = await readJson(request);
+      const result = await vectorizeAsset(payload);
       sendJson(response, 200, result);
       return;
     }
@@ -374,6 +382,53 @@ async function generateTransparentAsset(payload) {
   };
 }
 
+async function vectorizeAsset(payload) {
+  const dataUrl = assertString(payload.dataUrl, "dataUrl");
+  const imageBuffer = dataUrlToBuffer(dataUrl);
+  const {
+    vectorize,
+    ColorMode,
+    Hierarchical,
+    PathSimplifyMode
+  } = await loadVectorizerModule();
+
+  const svg = await vectorize(imageBuffer, {
+    colorMode: ColorMode.Color,
+    colorPrecision: 7,
+    filterSpeckle: 4,
+    spliceThreshold: 45,
+    cornerThreshold: 60,
+    hierarchical: Hierarchical.Stacked,
+    mode: PathSimplifyMode.Spline,
+    layerDifference: 5,
+    lengthThreshold: 4,
+    maxIterations: 2,
+    pathPrecision: 5
+  });
+
+  const pathCount = (svg.match(/<path/g) || []).length;
+  if (!pathCount) {
+    throw badRequest("没有检测到可转换的 SVG 路径");
+  }
+  if (pathCount > 900) {
+    throw badRequest("路径过多，这个素材更适合保留 PNG");
+  }
+
+  return {
+    ok: true,
+    engine: "vtracer",
+    pathCount,
+    svg
+  };
+}
+
+function loadVectorizerModule() {
+  if (!vectorizerModulePromise) {
+    vectorizerModulePromise = import("@neplex/vectorizer");
+  }
+  return vectorizerModulePromise;
+}
+
 async function generateOpenRouterImages({ prompt, count, width, height, images = [] }) {
   const aspectRatio = toOpenRouterAspectRatio(width, height);
   const results = [];
@@ -579,6 +634,14 @@ function dataUrlToFile(dataUrl, name) {
   const bytes = Buffer.from(match[2], "base64");
   const blob = new Blob([bytes], { type: mimeType });
   return new File([blob], name, { type: mimeType });
+}
+
+function dataUrlToBuffer(dataUrl) {
+  const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+  if (!match) {
+    throw badRequest("image dataUrl must be a base64 data URL");
+  }
+  return Buffer.from(match[2], "base64");
 }
 
 function buildUiScreenshotPrompt(prompt) {

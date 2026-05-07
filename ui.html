@@ -4689,6 +4689,13 @@ if(typeof define === 'function' && define.amd){
         const source = await loadImageElement(dataUrl);
         const sourceWidth = source.naturalWidth || source.width || fallbackWidth;
         const sourceHeight = source.naturalHeight || source.height || fallbackHeight;
+        const width = Math.max(1, Math.round(fallbackWidth || sourceWidth));
+        const height = Math.max(1, Math.round(fallbackHeight || sourceHeight));
+        const backendSvg = await vectorizeAssetWithBackend(dataUrl, width, height);
+        if (backendSvg) {
+          return backendSvg;
+        }
+
         const tracer = window.ImageTracer;
         if (!tracer || typeof tracer.imagedataToSVG !== "function") {
           throw new Error("SVG 转换引擎未加载");
@@ -4706,8 +4713,6 @@ if(typeof define === 'function' && define.amd){
         context.imageSmoothingQuality = "high";
         context.drawImage(source, 0, 0, sampleWidth, sampleHeight);
         const imageData = context.getImageData(0, 0, sampleWidth, sampleHeight);
-        const width = Math.max(1, Math.round(fallbackWidth || sourceWidth));
-        const height = Math.max(1, Math.round(fallbackHeight || sourceHeight));
         const traceScale = width / sampleWidth;
         const svg = tracer.imagedataToSVG(imageData, {
           ltres: 0.5,
@@ -4738,6 +4743,27 @@ if(typeof define === 'function' && define.amd){
         }
 
         return normalizeVectorSvg(svg, width, height);
+      }
+
+      async function vectorizeAssetWithBackend(dataUrl, width, height) {
+        try {
+          const response = await fetch(`${PROXY_BASE_URL}/api/assets/vectorize`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dataUrl, width, height })
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(result.error || `VTracer 转换失败：${response.status}`);
+          }
+          if (!result.svg) {
+            throw new Error("VTracer 没有返回 SVG");
+          }
+          return normalizeVectorSvg(result.svg, width, height);
+        } catch (error) {
+          console.warn("VTracer SVG conversion failed, falling back to ImageTracerJS.", error);
+          return null;
+        }
       }
 
       function normalizeVectorSvg(svg, width, height) {
