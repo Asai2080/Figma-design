@@ -521,6 +521,7 @@ async function requestSvgChatCompletion({ prompt, dataUrl, name }) {
 
 async function vectorizeAsset(payload) {
   const dataUrl = assertString(payload.dataUrl, "dataUrl");
+  const mode = payload.mode === "clean" ? "clean" : "faithful";
   const imageBuffer = dataUrlToBuffer(dataUrl);
   const {
     vectorize,
@@ -529,31 +530,48 @@ async function vectorizeAsset(payload) {
     PathSimplifyMode
   } = await loadVectorizerModule();
 
-  const svg = await vectorize(imageBuffer, {
-    colorMode: ColorMode.Color,
-    colorPrecision: 7,
-    filterSpeckle: 4,
-    spliceThreshold: 45,
-    cornerThreshold: 60,
-    hierarchical: Hierarchical.Stacked,
-    mode: PathSimplifyMode.Spline,
-    layerDifference: 5,
-    lengthThreshold: 4,
-    maxIterations: 2,
-    pathPrecision: 5
-  });
+  const options = mode === "clean"
+    ? {
+        colorMode: ColorMode.Color,
+        colorPrecision: 5,
+        filterSpeckle: 14,
+        spliceThreshold: 65,
+        cornerThreshold: 72,
+        hierarchical: Hierarchical.Stacked,
+        mode: PathSimplifyMode.Spline,
+        layerDifference: 14,
+        lengthThreshold: 9,
+        maxIterations: 4,
+        pathPrecision: 3
+      }
+    : {
+        colorMode: ColorMode.Color,
+        colorPrecision: 7,
+        filterSpeckle: 4,
+        spliceThreshold: 45,
+        cornerThreshold: 60,
+        hierarchical: Hierarchical.Stacked,
+        mode: PathSimplifyMode.Spline,
+        layerDifference: 5,
+        lengthThreshold: 4,
+        maxIterations: 2,
+        pathPrecision: 5
+      };
+
+  const svg = await vectorize(imageBuffer, options);
 
   const pathCount = (svg.match(/<path/g) || []).length;
   if (!pathCount) {
     throw badRequest("没有检测到可转换的 SVG 路径");
   }
-  if (pathCount > 900) {
+  if (pathCount > (mode === "clean" ? 650 : 900)) {
     throw badRequest("路径过多，这个素材更适合保留 PNG");
   }
 
   return {
     ok: true,
     engine: "vtracer",
+    mode,
     pathCount,
     svg
   };
