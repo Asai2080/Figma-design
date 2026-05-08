@@ -1205,7 +1205,7 @@
 
       .cut-item {
         display: grid;
-        grid-template-columns: 42px 1fr auto auto auto auto;
+        grid-template-columns: 42px 1fr auto auto auto auto auto;
         gap: 8px;
         align-items: center;
         min-width: 0;
@@ -1268,7 +1268,8 @@
 
       .cut-transparent,
       .cut-svg,
-      .cut-redraw {
+      .cut-redraw,
+      .cut-redraw-svg {
         display: grid;
         place-items: center;
         min-width: 44px;
@@ -1294,6 +1295,11 @@
       .cut-redraw.done {
         color: #0f6c7a;
         background: #e7f7fa;
+      }
+
+      .cut-redraw-svg.done {
+        color: #5d3fc8;
+        background: #f0edff;
       }
 
       .status {
@@ -3964,6 +3970,7 @@ if(typeof define === 'function' && define.amd){
             <button class="cut-transparent${asset.transparent ? " done" : ""}" type="button" data-transparent-slice="${asset.id}">${asset.transparent ? "已透明" : "透明"}</button>
             <button class="cut-svg${asset.svgData ? " done" : ""}" type="button" data-svg-slice="${asset.id}">${asset.svgData ? "SVG" : "转 SVG"}</button>
             <button class="cut-redraw${asset.aiRedrawn ? " done" : ""}" type="button" data-redraw-slice="${asset.id}">${asset.aiRedrawn ? "已重绘" : "AI 重绘"}</button>
+            <button class="cut-redraw-svg${asset.aiRedrawn && asset.svgData ? " done" : ""}" type="button" data-redraw-svg-slice="${asset.id}">${asset.aiRedrawn && asset.svgData ? "重绘 SVG" : "重绘+SVG"}</button>
             <button class="cut-remove" type="button" aria-label="删除 ${escapeHtml(asset.name)}" data-remove-slice="${asset.id}">×</button>
           </div>
         `).join("");
@@ -3998,6 +4005,12 @@ if(typeof define === 'function' && define.amd){
           button.addEventListener("click", async (event) => {
             event.stopPropagation();
             await redrawSliceWithAi(button.dataset.redrawSlice);
+          });
+        });
+        cutGrid.querySelectorAll("[data-redraw-svg-slice]").forEach((button) => {
+          button.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            await redrawSliceWithAi(button.dataset.redrawSvgSlice, { convertToSvg: true });
           });
         });
       }
@@ -4364,12 +4377,13 @@ if(typeof define === 'function' && define.amd){
         }
       }
 
-      async function redrawSliceWithAi(id) {
+      async function redrawSliceWithAi(id, options = {}) {
         const asset = getActiveSliceAsset(id);
         if (!asset) {
           return;
         }
-        setBusy(true, `正在 AI 重绘：${asset.name}`);
+        const shouldConvertToSvg = Boolean(options.convertToSvg);
+        setBusy(true, shouldConvertToSvg ? `正在 AI 重绘并转换 SVG：${asset.name}` : `正在 AI 重绘：${asset.name}`);
         try {
           const response = await fetch(`${PROXY_BASE_URL}/api/assets/ai-redraw`, {
             method: "POST",
@@ -4394,12 +4408,26 @@ if(typeof define === 'function' && define.amd){
           asset.transparent = Boolean(result.transparent);
           asset.aiRedrawn = true;
           asset.svgData = null;
+          let svgConversionError = null;
+          if (shouldConvertToSvg) {
+            try {
+              asset.svgData = await rasterAssetToEditableSvg(asset.dataUrl, asset.placement.width, asset.placement.height);
+            } catch (error) {
+              svgConversionError = error;
+            }
+          }
           activeSliceId = id;
           renderActiveResult(currentManifest);
           renderCutModules(currentManifest);
-          setStatus(`已 AI 重绘：${asset.name}。如果需要 SVG，可以再点“转 SVG”。`);
+          if (svgConversionError) {
+            setStatus(`已 AI 重绘 PNG，但 SVG 转换失败：${svgConversionError.message || String(svgConversionError)}`, true);
+          } else {
+            setStatus(shouldConvertToSvg
+              ? `已 AI 重绘并生成 SVG：${asset.name}。如果 SVG 效果不好，仍可保留 PNG。`
+              : `已 AI 重绘：${asset.name}。如果需要 SVG，可以再点“转 SVG”。`);
+          }
         } catch (error) {
-          setStatus(`AI 重绘失败：${error.message || String(error)}`, true);
+          setStatus(`${shouldConvertToSvg ? "AI 重绘+SVG" : "AI 重绘"}失败：${error.message || String(error)}`, true);
         } finally {
           setBusy(false);
         }
