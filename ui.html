@@ -4414,9 +4414,11 @@ if(typeof define === 'function' && define.amd){
         const height = asset?.placement?.height || 512;
         return [
           `Redraw this sliced UI asset as an editable SVG named "${asset?.name || "ui_asset"}".`,
-          "Use the attached PNG only as visual reference.",
-          "Preserve the semantic meaning, silhouette, orientation, main colors, and visual weight.",
-          "Simplify screenshot noise, blur, shadows, text fragments, and neighboring UI artifacts into clean vector shapes.",
+          "Use the attached PNG as the source of truth, not just loose inspiration.",
+          "Create a similarity-first vector recreation: preserve the silhouette, proportions, expression, orientation, color palette, visual weight, and emotional tone.",
+          "Preserve distinctive details such as inner highlights, soft shaded patches, facial features, motion streaks, sparkles, small decorations, layered blobs, and asymmetrical contours when present.",
+          "Clean only screenshot noise, blur, background contamination, text fragments, and neighboring UI artifacts.",
+          "Do not replace it with a generic simplified icon.",
           "Return raw SVG only, with transparent background and no embedded raster image.",
           `Target viewBox: 0 0 ${width} ${height}. Keep the asset centered with tight padding.`
         ].join("\n");

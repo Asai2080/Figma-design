@@ -867,25 +867,27 @@ function buildAssetRedrawPrompt(prompt) {
 
 function buildAssetSvgPrompt({ prompt, name, width, height }) {
   return [
-    "You are a senior icon designer and SVG engineer.",
-    "Use the attached sliced UI asset as visual reference only.",
-    "Redraw it into a polished, editable vector icon suitable for Figma.",
+    "You are a senior icon illustrator and SVG engineer.",
+    "Use the attached sliced UI asset as the source of truth.",
+    "Create a faithful, polished, editable SVG recreation for Figma. This is a similarity-first redraw, not a redesign.",
     prompt || `Redraw "${name}" as an SVG asset.`,
     "",
-    "Design goals:",
-    "- Reconstruct the asset as clean geometric vector artwork instead of tracing pixels.",
-    "- Preserve the original meaning, silhouette, orientation, color family, visual weight, and recognizable details.",
-    "- Use tasteful rounded corners, balanced spacing, consistent stroke width, and simple gradients only when they improve the icon.",
-    "- Simplify noisy pixels, blurry edges, background contamination, compression artifacts, neighboring UI fragments, and text remnants.",
-    "- Keep the icon centered with tight but comfortable padding. Avoid tiny one-pixel fragments.",
+    "Fidelity goals:",
+    "- Match the source asset's silhouette, proportions, pose, orientation, expression, color palette, visual weight, and emotional tone.",
+    "- Preserve distinctive details: inner highlights, soft shaded patches, facial features, motion streaks, sparkles, small decorations, layered blobs, and asymmetrical contours when present.",
+    "- Do not replace the source with a generic icon. Do not flatten a playful illustration into an overly simple symbol.",
+    "- Clean up only screenshot noise, compression artifacts, accidental background contamination, blurry pixel edges, and neighboring UI fragments.",
+    "- Use vector-friendly approximations for soft details: layered translucent shapes, simple gradients, opacity, and grouped paths.",
+    "- Keep the artwork centered with the same relative padding and scale as the source crop.",
     "",
     "SVG requirements:",
     `- Return exactly one complete <svg>...</svg> element sized ${width} by ${height}.`,
     `- Use viewBox=\"0 0 ${width} ${height}\".`,
     "- Use editable vector primitives only: path, rect, circle, ellipse, line, polyline, polygon, g, defs, linearGradient, radialGradient.",
-    "- Prefer fewer, cleaner grouped shapes over many tiny traced paths.",
+    "- Prefer clean grouped shapes, but keep enough layers to preserve important illustration details.",
     "- Do not embed raster images. Do not use <image>, foreignObject, base64, external href, CSS imports, script, animation, raster filters, or HTML.",
-    "- Transparent background. No phone frame, no full app screen, no extra labels, no extra decoration, no explanation.",
+    "- Transparent background. Keep source decorative marks that belong to the asset, but add no new decoration.",
+    "- No phone frame, no full app screen, no extra labels, no explanation.",
     "",
     "Return only raw SVG code. Do not wrap it in Markdown."
   ].join("\n");
@@ -897,12 +899,12 @@ function buildAssetSvgRetryPrompt(basePrompt) {
     "",
     "The previous SVG candidate failed quality validation.",
     "Regenerate it more cleanly:",
-    "- Do not trace pixels.",
+    "- Do not trace pixels mechanically, but do preserve the source composition and distinctive details.",
+    "- Do not redesign it into a generic simplified icon.",
     "- Do not use raster images or embedded data.",
     "- Include a correct viewBox on the <svg> element.",
-    "- Use fewer than 80 visible vector shapes unless the icon truly needs more.",
-    "- Merge tiny fragments into clean paths or simple geometric shapes.",
-    "- Make the result look like a professionally designed app icon asset, not an auto-traced bitmap."
+    "- Use enough clean vector layers to preserve the source look, but merge tiny fragments into purposeful shapes.",
+    "- Make the result look like a professionally redrawn app asset that still clearly matches the reference."
   ].join("\n");
 }
 
