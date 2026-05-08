@@ -1205,7 +1205,7 @@
 
       .cut-item {
         display: grid;
-        grid-template-columns: 42px 1fr auto auto auto;
+        grid-template-columns: 42px 1fr auto auto auto auto;
         gap: 8px;
         align-items: center;
         min-width: 0;
@@ -1267,7 +1267,8 @@
       }
 
       .cut-transparent,
-      .cut-svg {
+      .cut-svg,
+      .cut-redraw {
         display: grid;
         place-items: center;
         min-width: 44px;
@@ -1288,6 +1289,11 @@
       .cut-svg.done {
         color: #6846d8;
         background: #efebff;
+      }
+
+      .cut-redraw.done {
+        color: #0f6c7a;
+        background: #e7f7fa;
       }
 
       .status {
@@ -3953,10 +3959,11 @@ if(typeof define === 'function' && define.amd){
             <img class="cut-thumb" src="${asset.dataUrl}" alt="${escapeHtml(asset.name)}" />
             <div class="cut-meta">
               <span class="cut-name">${index + 1}. ${escapeHtml(asset.name)}</span>
-              <span class="cut-size">${asset.placement.width} × ${asset.placement.height}${asset.transparent ? " · 透明 PNG" : ""}${asset.svgData ? " · SVG" : ""}</span>
+              <span class="cut-size">${asset.placement.width} × ${asset.placement.height}${asset.transparent ? " · 透明 PNG" : ""}${asset.svgData ? " · SVG" : ""}${asset.aiRedrawn ? " · AI 重绘" : ""}</span>
             </div>
             <button class="cut-transparent${asset.transparent ? " done" : ""}" type="button" data-transparent-slice="${asset.id}">${asset.transparent ? "已透明" : "透明"}</button>
             <button class="cut-svg${asset.svgData ? " done" : ""}" type="button" data-svg-slice="${asset.id}">${asset.svgData ? "SVG" : "转 SVG"}</button>
+            <button class="cut-redraw${asset.aiRedrawn ? " done" : ""}" type="button" data-redraw-slice="${asset.id}">${asset.aiRedrawn ? "已重绘" : "AI 重绘"}</button>
             <button class="cut-remove" type="button" aria-label="删除 ${escapeHtml(asset.name)}" data-remove-slice="${asset.id}">×</button>
           </div>
         `).join("");
@@ -3985,6 +3992,12 @@ if(typeof define === 'function' && define.amd){
           button.addEventListener("click", async (event) => {
             event.stopPropagation();
             await convertSliceToSvg(button.dataset.svgSlice);
+          });
+        });
+        cutGrid.querySelectorAll("[data-redraw-slice]").forEach((button) => {
+          button.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            await redrawSliceWithAi(button.dataset.redrawSlice);
           });
         });
       }
@@ -4256,6 +4269,7 @@ if(typeof define === 'function' && define.amd){
           type: "manual_slice",
           placement,
           transparent: false,
+          aiRedrawn: false,
           selected: true,
           dataUrl,
           svgData: null,
@@ -4277,6 +4291,7 @@ if(typeof define === 'function' && define.amd){
         asset.dataUrl = await cropImageRegion(activeImage.dataUrl, asset.placement);
         Object.assign(asset, await createSliceRepairPatch(activeImage.dataUrl, asset.placement));
         asset.transparent = false;
+        asset.aiRedrawn = false;
         asset.svgData = null;
       }
 
@@ -4347,6 +4362,60 @@ if(typeof define === 'function' && define.amd){
         } finally {
           setBusy(false);
         }
+      }
+
+      async function redrawSliceWithAi(id) {
+        const asset = getActiveSliceAsset(id);
+        if (!asset) {
+          return;
+        }
+        setBusy(true, `正在 AI 重绘：${asset.name}`);
+        try {
+          const response = await fetch(`${PROXY_BASE_URL}/api/assets/ai-redraw`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              dataUrl: asset.dataUrl,
+              name: asset.name,
+              width: asset.placement.width,
+              height: asset.placement.height,
+              prompt: buildAiRedrawPrompt(asset)
+            })
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(result.error || `AI 重绘失败：${response.status}`);
+          }
+          const image = Array.isArray(result.images) ? result.images[0] : null;
+          if (!image?.dataUrl) {
+            throw new Error("AI 重绘没有返回图片");
+          }
+          asset.dataUrl = image.dataUrl;
+          asset.transparent = Boolean(result.transparent);
+          asset.aiRedrawn = true;
+          asset.svgData = null;
+          activeSliceId = id;
+          renderActiveResult(currentManifest);
+          renderCutModules(currentManifest);
+          setStatus(`已 AI 重绘：${asset.name}。如果需要 SVG，可以再点“转 SVG”。`);
+        } catch (error) {
+          setStatus(`AI 重绘失败：${error.message || String(error)}`, true);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      function buildAiRedrawPrompt(asset) {
+        const width = asset?.placement?.width || 512;
+        const height = asset?.placement?.height || 512;
+        return [
+          `Redraw this sliced UI asset as a clean standalone asset named "${asset?.name || "ui_asset"}".`,
+          "Keep the original semantic meaning, silhouette, orientation, color family, and visual weight.",
+          "Remove screenshot noise, compression artifacts, text fragments, accidental background pixels, shadows from neighboring UI, and blurry edges.",
+          "Output a polished isolated UI icon or interface element on a transparent background.",
+          "Do not create a full app screen, mockup, phone frame, poster, or extra decoration.",
+          `Target canvas: ${width}x${height}px. Keep the asset centered with tight padding.`
+        ].join("\n");
       }
 
       async function exportSlicePackage() {
@@ -5085,6 +5154,7 @@ if(typeof define === 'function' && define.amd){
             format: "png",
             formats: asset.svgData ? ["png", "svg"] : ["png"],
             transparent: Boolean(asset.transparent),
+            aiRedrawn: Boolean(asset.aiRedrawn),
             selectedImageIndex: imageIndex,
             placement: { ...asset.placement }
           };

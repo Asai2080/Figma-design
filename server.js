@@ -150,6 +150,14 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && request.url === "/api/assets/ai-redraw") {
+      requireApiKey();
+      const payload = await readJson(request);
+      const result = await redrawAsset(payload);
+      sendJson(response, 200, result);
+      return;
+    }
+
     if (request.method === "POST" && request.url === "/api/assets/vectorize") {
       const payload = await readJson(request);
       const result = await vectorizeAsset(payload);
@@ -379,6 +387,51 @@ async function generateTransparentAsset(payload) {
       model: openaiImageModel,
       size: body.size
     }
+  };
+}
+
+async function redrawAsset(payload) {
+  const dataUrl = assertString(payload.dataUrl, "dataUrl");
+  const width = payload.width;
+  const height = payload.height;
+  const prompt = buildAssetRedrawPrompt(assertString(payload.prompt || "Redraw this UI asset.", "prompt"));
+  if (activeProvider === "openrouter") {
+    return {
+      ...(await generateOpenRouterImages({
+        prompt,
+        count: 1,
+        width,
+        height,
+        images: [
+          {
+            dataUrl,
+            name: payload.name || "slice-reference.png"
+          }
+        ]
+      })),
+      transparent: false
+    };
+  }
+
+  const form = new FormData();
+  form.set("model", openaiImageModel);
+  form.set("prompt", prompt);
+  form.set("size", toOpenAIImageSize(width, height));
+  form.set("quality", payload.quality || "high");
+  form.set("output_format", "png");
+  form.set("background", "transparent");
+  form.set("n", "1");
+  form.append("image[]", dataUrlToFile(dataUrl, payload.name || "slice-reference.png"));
+
+  const data = await callOpenAIForm("/v1/images/edits", form);
+  return {
+    ...(await normalizeImageResponse(data)),
+    provider: {
+      baseUrl: openaiBaseUrl,
+      model: openaiImageModel,
+      size: toOpenAIImageSize(width, height)
+    },
+    transparent: true
   };
 }
 
@@ -651,6 +704,19 @@ function buildUiScreenshotPrompt(prompt) {
     "Fill the entire image with the interface.",
     "No phone mockup, no device frame, no floating poster, no outer grey background, no table, no wall, no presentation board.",
     "Keep the UI aligned to the requested orientation and make it read like a real in-app screen."
+  ].join("\n\n");
+}
+
+function buildAssetRedrawPrompt(prompt) {
+  return [
+    prompt,
+    "This is not a full-screen UI generation task.",
+    "Use the attached image only as the source asset reference.",
+    "Redraw a single clean standalone UI asset.",
+    "Preserve the source asset meaning, rough shape, color family, and orientation.",
+    "Remove screenshot noise, neighboring UI fragments, accidental background, compression artifacts, and blurry edges.",
+    "Output a transparent PNG when the provider supports transparency.",
+    "Do not add a phone frame, app screen, mockup, poster, labels, extra icons, or extra background."
   ].join("\n\n");
 }
 
