@@ -4415,10 +4415,13 @@ if(typeof define === 'function' && define.amd){
         return [
           `Redraw this sliced UI asset as an editable SVG named "${asset?.name || "ui_asset"}".`,
           "Use the attached PNG as the source of truth, not just loose inspiration.",
-          "Create a similarity-first vector recreation: preserve the silhouette, proportions, expression, orientation, color palette, visual weight, and emotional tone.",
-          "Preserve distinctive details such as inner highlights, soft shaded patches, facial features, motion streaks, sparkles, small decorations, layered blobs, and asymmetrical contours when present.",
+          "Create a 1:1 similarity-first vector recreation, not a redesign, restyle, simplification, or icon-set normalization.",
+          "Silently inspect and preserve the visual inventory: silhouette lobes/parts, facial features, accessories, decorative marks, motion lines, highlights, shadows, overlap order, angles, spacing, scale, asymmetry, and crop padding.",
+          "Preserve distinctive details such as irregular puffy outlines, organic curves, inner highlights, soft shaded patches, facial features, accessory geometry, motion streaks, sparkles, small decorations, layered blobs, cast shadows, and asymmetrical contours when present.",
+          "Accessories such as sunglasses, badges, hands, arrows, stars, or facial marks must keep their source angle, thickness, placement, and expression.",
           "Clean only screenshot noise, blur, background contamination, text fragments, and neighboring UI artifacts.",
-          "Do not replace it with a generic simplified icon.",
+          "Do not replace it with a generic simplified icon. Do not make it cleaner by deleting personality details.",
+          "Use cubic Bezier paths, layered translucent shapes, gradients, opacity, and grouped paths to preserve the original illustration richness.",
           "Return raw SVG only, with transparent background and no embedded raster image.",
           `Target viewBox: 0 0 ${width} ${height}. Keep the asset centered with tight padding.`
         ].join("\n");
