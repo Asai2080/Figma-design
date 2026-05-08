@@ -1205,7 +1205,7 @@
 
       .cut-item {
         display: grid;
-        grid-template-columns: 42px 1fr auto auto auto auto auto;
+        grid-template-columns: 42px 1fr auto auto auto auto;
         gap: 8px;
         align-items: center;
         min-width: 0;
@@ -1268,7 +1268,6 @@
 
       .cut-transparent,
       .cut-svg,
-      .cut-svg-clean,
       .cut-redraw {
         display: grid;
         place-items: center;
@@ -1290,11 +1289,6 @@
       .cut-svg.done {
         color: #6846d8;
         background: #efebff;
-      }
-
-      .cut-svg-clean.done {
-        color: #0d6c63;
-        background: #e8f7f4;
       }
 
       .cut-redraw.done {
@@ -3965,11 +3959,10 @@ if(typeof define === 'function' && define.amd){
             <img class="cut-thumb" src="${asset.dataUrl}" alt="${escapeHtml(asset.name)}" />
             <div class="cut-meta">
               <span class="cut-name">${index + 1}. ${escapeHtml(asset.name)}</span>
-              <span class="cut-size">${asset.placement.width} × ${asset.placement.height}${asset.transparent ? " · 透明 PNG" : ""}${asset.svgData ? ` · ${asset.svgMode === "clean" ? "干净 SVG" : "SVG"}` : ""}${asset.aiRedrawn ? " · AI 重绘" : ""}</span>
+              <span class="cut-size">${asset.placement.width} × ${asset.placement.height}${asset.transparent ? " · 透明 PNG" : ""}${asset.svgData ? " · SVG" : ""}${asset.aiRedrawn ? " · AI 重绘" : ""}</span>
             </div>
             <button class="cut-transparent${asset.transparent ? " done" : ""}" type="button" data-transparent-slice="${asset.id}">${asset.transparent ? "已透明" : "透明"}</button>
             <button class="cut-svg${asset.svgData ? " done" : ""}" type="button" data-svg-slice="${asset.id}">${asset.svgData ? "SVG" : "转 SVG"}</button>
-            <button class="cut-svg-clean${asset.svgMode === "clean" && asset.svgData ? " done" : ""}" type="button" data-clean-svg-slice="${asset.id}">${asset.svgMode === "clean" && asset.svgData ? "干净" : "干净 SVG"}</button>
             <button class="cut-redraw${asset.aiRedrawn && asset.svgData ? " done" : ""}" type="button" data-redraw-slice="${asset.id}">${asset.aiRedrawn && asset.svgData ? "AI SVG" : "AI 重绘 SVG"}</button>
             <button class="cut-remove" type="button" aria-label="删除 ${escapeHtml(asset.name)}" data-remove-slice="${asset.id}">×</button>
           </div>
@@ -3998,13 +3991,7 @@ if(typeof define === 'function' && define.amd){
         cutGrid.querySelectorAll("[data-svg-slice]").forEach((button) => {
           button.addEventListener("click", async (event) => {
             event.stopPropagation();
-            await convertSliceToSvg(button.dataset.svgSlice, "faithful");
-          });
-        });
-        cutGrid.querySelectorAll("[data-clean-svg-slice]").forEach((button) => {
-          button.addEventListener("click", async (event) => {
-            event.stopPropagation();
-            await convertSliceToSvg(button.dataset.cleanSvgSlice, "clean");
+            await convertSliceToSvg(button.dataset.svgSlice);
           });
         });
         cutGrid.querySelectorAll("[data-redraw-slice]").forEach((button) => {
@@ -4358,23 +4345,18 @@ if(typeof define === 'function' && define.amd){
         }
       }
 
-      async function convertSliceToSvg(id, mode = "faithful") {
+      async function convertSliceToSvg(id) {
         const asset = getActiveSliceAsset(id);
         if (!asset) {
           return;
         }
-        const cleanMode = mode === "clean";
-        setBusy(true, `正在${cleanMode ? "生成干净 SVG" : "实验转换 SVG"}：${asset.name}`);
+        setBusy(true, `正在实验转换 SVG：${asset.name}`);
         try {
-          asset.svgData = await rasterAssetToEditableSvg(asset.dataUrl, asset.placement.width, asset.placement.height, mode);
-          asset.svgMode = mode;
-          asset.aiRedrawn = false;
+          asset.svgData = await rasterAssetToEditableSvg(asset.dataUrl, asset.placement.width, asset.placement.height);
           activeSliceId = id;
           renderActiveResult(currentManifest);
           renderCutModules(currentManifest);
-          setStatus(cleanMode
-            ? `已生成干净 SVG：${asset.name}。如果细节丢失，可以再试“转 SVG”。`
-            : `已生成保真 SVG：${asset.name}。边缘太碎时可以再试“干净 SVG”。`);
+          setStatus(`已生成实验 SVG：${asset.name}。复杂图片建议继续保留 PNG。`);
         } catch (error) {
           setStatus(`SVG 转换失败：${error.message || String(error)}`, true);
         } finally {
@@ -4408,7 +4390,6 @@ if(typeof define === 'function' && define.amd){
             throw new Error("AI 重绘没有返回 SVG");
           }
           asset.aiRedrawn = true;
-          asset.svgMode = "ai";
           asset.svgData = normalizeVectorSvg(result.svg, asset.placement.width, asset.placement.height);
           activeSliceId = id;
           renderActiveResult(currentManifest);
@@ -4783,13 +4764,13 @@ if(typeof define === 'function' && define.amd){
         return canvas.toDataURL("image/png");
       }
 
-      async function rasterAssetToEditableSvg(dataUrl, fallbackWidth, fallbackHeight, mode = "faithful") {
+      async function rasterAssetToEditableSvg(dataUrl, fallbackWidth, fallbackHeight) {
         const source = await loadImageElement(dataUrl);
         const sourceWidth = source.naturalWidth || source.width || fallbackWidth;
         const sourceHeight = source.naturalHeight || source.height || fallbackHeight;
         const width = Math.max(1, Math.round(fallbackWidth || sourceWidth));
         const height = Math.max(1, Math.round(fallbackHeight || sourceHeight));
-        const backendSvg = await vectorizeAssetWithBackend(dataUrl, width, height, mode);
+        const backendSvg = await vectorizeAssetWithBackend(dataUrl, width, height);
         if (backendSvg) {
           return backendSvg;
         }
@@ -4812,44 +4793,43 @@ if(typeof define === 'function' && define.amd){
         context.drawImage(source, 0, 0, sampleWidth, sampleHeight);
         const imageData = context.getImageData(0, 0, sampleWidth, sampleHeight);
         const traceScale = width / sampleWidth;
-        const cleanMode = mode === "clean";
         const svg = tracer.imagedataToSVG(imageData, {
-          ltres: cleanMode ? 1 : 0.5,
-          qtres: cleanMode ? 1 : 0.5,
-          pathomit: cleanMode ? 18 : 8,
+          ltres: 0.5,
+          qtres: 0.5,
+          pathomit: 8,
           rightangleenhance: false,
           colorsampling: 2,
-          numberofcolors: cleanMode ? 10 : 18,
-          mincolorratio: cleanMode ? 0.02 : 0.01,
-          colorquantcycles: cleanMode ? 5 : 3,
+          numberofcolors: 18,
+          mincolorratio: 0.01,
+          colorquantcycles: 3,
           layering: 0,
           strokewidth: 0,
           linefilter: true,
           scale: traceScale,
-          roundcoords: cleanMode ? 0 : 1,
+          roundcoords: 1,
           viewbox: false,
           desc: false,
-          blurradius: cleanMode ? 1 : 0,
-          blurdelta: cleanMode ? 32 : 20
+          blurradius: 0,
+          blurdelta: 20
         });
 
         const pathCount = (svg.match(/<path/g) || []).length;
         if (!pathCount) {
           throw new Error("没有检测到可转换的 SVG 路径");
         }
-        if (pathCount > (cleanMode ? 520 : 700)) {
+        if (pathCount > 700) {
           throw new Error("路径过多，这个素材更适合保留 PNG");
         }
 
         return normalizeVectorSvg(svg, width, height);
       }
 
-      async function vectorizeAssetWithBackend(dataUrl, width, height, mode = "faithful") {
+      async function vectorizeAssetWithBackend(dataUrl, width, height) {
         try {
           const response = await fetch(`${PROXY_BASE_URL}/api/assets/vectorize`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ dataUrl, width, height, mode })
+            body: JSON.stringify({ dataUrl, width, height })
           });
           const result = await response.json().catch(() => ({}));
           if (!response.ok) {
