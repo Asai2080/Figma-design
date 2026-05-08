@@ -447,12 +447,57 @@ async function redrawAssetAsSvg(payload) {
   const dataUrl = assertString(payload.dataUrl, "dataUrl");
   const width = clampNumber(payload.width || 512, 16, 4096);
   const height = clampNumber(payload.height || 512, 16, 4096);
-  const prompt = buildAssetSvgPrompt({
+  const basePrompt = buildAssetSvgPrompt({
     prompt: payload.prompt || "",
     name: payload.name || "ui_asset",
     width,
     height
   });
+  const attempts = [
+    { prompt: basePrompt, label: "primary" },
+    { prompt: buildAssetSvgRetryPrompt(basePrompt), label: "retry-clean-vector" }
+  ];
+  let lastError = null;
+  let svg = "";
+  let usedAttempt = attempts[0].label;
+
+  for (const attempt of attempts) {
+    try {
+      const data = await requestSvgChatCompletion({
+        prompt: attempt.prompt,
+        dataUrl,
+        name: payload.name || "slice-reference.png"
+      });
+      const text = extractChatCompletionText(data);
+      svg = sanitizeGeneratedSvg(text);
+      usedAttempt = attempt.label;
+      break;
+    } catch (error) {
+      lastError = error;
+      if (!error.isSvgValidationError || attempt === attempts[attempts.length - 1]) {
+        throw error;
+      }
+    }
+  }
+
+  if (!svg) {
+    throw lastError || svgValidationError("模型没有返回有效 SVG");
+  }
+
+  return {
+    ok: true,
+    engine: "ai-direct-svg",
+    svg,
+    attempt: usedAttempt,
+    provider: {
+      baseUrl: openaiBaseUrl,
+      model: openaiImageModel,
+      size: `${width}x${height}`
+    }
+  };
+}
+
+async function requestSvgChatCompletion({ prompt, dataUrl, name }) {
   const body = {
     model: openaiImageModel,
     messages: [
@@ -461,29 +506,17 @@ async function redrawAssetAsSvg(payload) {
         content: buildOpenRouterMessageContent(prompt, [
           {
             dataUrl,
-            name: payload.name || "slice-reference.png"
+            name
           }
         ])
       }
     ],
     stream: false,
-    temperature: 0.15
+    temperature: 0.08
   };
-  const data = activeProvider === "openrouter"
-    ? await callOpenRouterJson("/chat/completions", body)
-    : await callOpenAIJson("/v1/chat/completions", body);
-  const text = extractChatCompletionText(data);
-  const svg = sanitizeGeneratedSvg(text);
-  return {
-    ok: true,
-    engine: "ai-direct-svg",
-    svg,
-    provider: {
-      baseUrl: openaiBaseUrl,
-      model: openaiImageModel,
-      size: `${width}x${height}`
-    }
-  };
+  return activeProvider === "openrouter"
+    ? callOpenRouterJson("/chat/completions", body)
+    : callOpenAIJson("/v1/chat/completions", body);
 }
 
 async function vectorizeAsset(payload) {
@@ -666,7 +699,7 @@ function sanitizeGeneratedSvg(text) {
     .trim();
   const match = withoutFence.match(/<svg\b[\s\S]*?<\/svg>/i);
   if (!match) {
-    throw badRequest("模型没有返回有效 SVG");
+    throw svgValidationError("模型没有返回有效 SVG");
   }
   const svg = match[0].trim();
   const blockedPatterns = [
@@ -679,14 +712,18 @@ function sanitizeGeneratedSvg(text) {
     /javascript:/i
   ];
   if (blockedPatterns.some((pattern) => pattern.test(svg))) {
-    throw badRequest("模型返回的 SVG 包含不允许的嵌入内容");
+    throw svgValidationError("模型返回的 SVG 包含不允许的嵌入内容");
+  }
+  const openTag = svg.match(/<svg\b[^>]*>/i)?.[0] || "";
+  if (!/\bviewBox\s*=/i.test(openTag)) {
+    throw svgValidationError("模型返回的 SVG 缺少 viewBox");
   }
   const shapeCount = (svg.match(/<(path|rect|circle|ellipse|line|polyline|polygon)\b/gi) || []).length;
   if (!shapeCount) {
-    throw badRequest("模型返回的 SVG 没有可编辑图形元素");
+    throw svgValidationError("模型返回的 SVG 没有可编辑图形元素");
   }
   if (shapeCount > 220) {
-    throw badRequest("AI SVG 图层过多，请重新切更小的区域或简化素材");
+    throw svgValidationError("AI SVG 图层过多，请重新切更小的区域或简化素材");
   }
   return svg;
 }
@@ -830,21 +867,42 @@ function buildAssetRedrawPrompt(prompt) {
 
 function buildAssetSvgPrompt({ prompt, name, width, height }) {
   return [
-    "You are an expert icon designer and SVG engineer.",
-    "Look at the attached sliced UI asset and redraw it as clean editable SVG code.",
+    "You are a senior icon designer and SVG engineer.",
+    "Use the attached sliced UI asset as visual reference only.",
+    "Redraw it into a polished, editable vector icon suitable for Figma.",
     prompt || `Redraw "${name}" as an SVG asset.`,
     "",
-    "Output requirements:",
+    "Design goals:",
+    "- Reconstruct the asset as clean geometric vector artwork instead of tracing pixels.",
+    "- Preserve the original meaning, silhouette, orientation, color family, visual weight, and recognizable details.",
+    "- Use tasteful rounded corners, balanced spacing, consistent stroke width, and simple gradients only when they improve the icon.",
+    "- Simplify noisy pixels, blurry edges, background contamination, compression artifacts, neighboring UI fragments, and text remnants.",
+    "- Keep the icon centered with tight but comfortable padding. Avoid tiny one-pixel fragments.",
+    "",
+    "SVG requirements:",
     `- Return exactly one complete <svg>...</svg> element sized ${width} by ${height}.`,
     `- Use viewBox=\"0 0 ${width} ${height}\".`,
     "- Use editable vector primitives only: path, rect, circle, ellipse, line, polyline, polygon, g, defs, linearGradient, radialGradient.",
-    "- Do not embed raster images. Do not use <image>, foreignObject, base64, external href, CSS imports, script, animation, filters that depend on raster effects, or HTML.",
-    "- Preserve the icon/asset meaning, silhouette, approximate colors, visual weight, and orientation.",
-    "- Simplify noisy pixels, screenshot artifacts, shadows from neighboring UI, and blurry edges into clean vector shapes.",
-    "- Keep the result suitable for Figma editing: grouped shapes, reasonable path count, no tiny one-pixel fragments.",
-    "- Transparent background. No phone frame, no full app screen, no extra label text, no explanation.",
+    "- Prefer fewer, cleaner grouped shapes over many tiny traced paths.",
+    "- Do not embed raster images. Do not use <image>, foreignObject, base64, external href, CSS imports, script, animation, raster filters, or HTML.",
+    "- Transparent background. No phone frame, no full app screen, no extra labels, no extra decoration, no explanation.",
     "",
     "Return only raw SVG code. Do not wrap it in Markdown."
+  ].join("\n");
+}
+
+function buildAssetSvgRetryPrompt(basePrompt) {
+  return [
+    basePrompt,
+    "",
+    "The previous SVG candidate failed quality validation.",
+    "Regenerate it more cleanly:",
+    "- Do not trace pixels.",
+    "- Do not use raster images or embedded data.",
+    "- Include a correct viewBox on the <svg> element.",
+    "- Use fewer than 80 visible vector shapes unless the icon truly needs more.",
+    "- Merge tiny fragments into clean paths or simple geometric shapes.",
+    "- Make the result look like a professionally designed app icon asset, not an auto-traced bitmap."
   ].join("\n");
 }
 
@@ -943,6 +1001,13 @@ function clampNumber(value, min, max) {
 function badRequest(message) {
   const error = new Error(message);
   error.statusCode = 400;
+  return error;
+}
+
+function svgValidationError(message) {
+  const error = new Error(message);
+  error.statusCode = 422;
+  error.isSvgValidationError = true;
   return error;
 }
 
