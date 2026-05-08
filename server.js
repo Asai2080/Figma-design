@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 const HOST = process.env.HOST || "127.0.0.1";
-const PORT = Number(process.env.PORT || 8787);
+const PORT = Number(process.env.PORT || 18787);
 const CONFIG_FILE = path.join(__dirname, ".local-provider-config.json");
 const PROVIDER_DEFAULTS = {
   thirdParty: {
