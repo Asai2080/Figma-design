@@ -158,6 +158,14 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && request.url === "/api/assets/redraw-svg") {
+      requireApiKey();
+      const payload = await readJson(request);
+      const result = await redrawAssetAsSvg(payload);
+      sendJson(response, 200, result);
+      return;
+    }
+
     if (request.method === "POST" && request.url === "/api/assets/vectorize") {
       const payload = await readJson(request);
       const result = await vectorizeAsset(payload);
@@ -435,6 +443,49 @@ async function redrawAsset(payload) {
   };
 }
 
+async function redrawAssetAsSvg(payload) {
+  const dataUrl = assertString(payload.dataUrl, "dataUrl");
+  const width = clampNumber(payload.width || 512, 16, 4096);
+  const height = clampNumber(payload.height || 512, 16, 4096);
+  const prompt = buildAssetSvgPrompt({
+    prompt: payload.prompt || "",
+    name: payload.name || "ui_asset",
+    width,
+    height
+  });
+  const body = {
+    model: openaiImageModel,
+    messages: [
+      {
+        role: "user",
+        content: buildOpenRouterMessageContent(prompt, [
+          {
+            dataUrl,
+            name: payload.name || "slice-reference.png"
+          }
+        ])
+      }
+    ],
+    stream: false,
+    temperature: 0.15
+  };
+  const data = activeProvider === "openrouter"
+    ? await callOpenRouterJson("/chat/completions", body)
+    : await callOpenAIJson("/v1/chat/completions", body);
+  const text = extractChatCompletionText(data);
+  const svg = sanitizeGeneratedSvg(text);
+  return {
+    ok: true,
+    engine: "ai-direct-svg",
+    svg,
+    provider: {
+      baseUrl: openaiBaseUrl,
+      model: openaiImageModel,
+      size: `${width}x${height}`
+    }
+  };
+}
+
 async function vectorizeAsset(payload) {
   const dataUrl = assertString(payload.dataUrl, "dataUrl");
   const imageBuffer = dataUrlToBuffer(dataUrl);
@@ -583,6 +634,63 @@ function normalizeOpenRouterImageResponse(data, startIndex = 0) {
   return { images };
 }
 
+function extractChatCompletionText(data) {
+  const choices = Array.isArray(data.choices) ? data.choices : [];
+  for (const choice of choices) {
+    const content = choice?.message?.content;
+    if (typeof content === "string" && content.trim()) {
+      return content.trim();
+    }
+    if (Array.isArray(content)) {
+      const text = content
+        .map((item) => {
+          if (typeof item === "string") {
+            return item;
+          }
+          return item?.text || item?.content || "";
+        })
+        .join("\n")
+        .trim();
+      if (text) {
+        return text;
+      }
+    }
+  }
+  throw new Error("模型没有返回 SVG 文本");
+}
+
+function sanitizeGeneratedSvg(text) {
+  const withoutFence = String(text || "")
+    .replace(/^```(?:svg|xml)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const match = withoutFence.match(/<svg\b[\s\S]*?<\/svg>/i);
+  if (!match) {
+    throw badRequest("模型没有返回有效 SVG");
+  }
+  const svg = match[0].trim();
+  const blockedPatterns = [
+    /<script\b/i,
+    /<foreignObject\b/i,
+    /<image\b/i,
+    /\bon[a-z]+\s*=/i,
+    /\b(?:href|xlink:href)\s*=/i,
+    /data:image\//i,
+    /javascript:/i
+  ];
+  if (blockedPatterns.some((pattern) => pattern.test(svg))) {
+    throw badRequest("模型返回的 SVG 包含不允许的嵌入内容");
+  }
+  const shapeCount = (svg.match(/<(path|rect|circle|ellipse|line|polyline|polygon)\b/gi) || []).length;
+  if (!shapeCount) {
+    throw badRequest("模型返回的 SVG 没有可编辑图形元素");
+  }
+  if (shapeCount > 220) {
+    throw badRequest("AI SVG 图层过多，请重新切更小的区域或简化素材");
+  }
+  return svg;
+}
+
 async function callOpenAIJson(path, body) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
@@ -718,6 +826,26 @@ function buildAssetRedrawPrompt(prompt) {
     "Output a transparent PNG when the provider supports transparency.",
     "Do not add a phone frame, app screen, mockup, poster, labels, extra icons, or extra background."
   ].join("\n\n");
+}
+
+function buildAssetSvgPrompt({ prompt, name, width, height }) {
+  return [
+    "You are an expert icon designer and SVG engineer.",
+    "Look at the attached sliced UI asset and redraw it as clean editable SVG code.",
+    prompt || `Redraw "${name}" as an SVG asset.`,
+    "",
+    "Output requirements:",
+    `- Return exactly one complete <svg>...</svg> element sized ${width} by ${height}.`,
+    `- Use viewBox=\"0 0 ${width} ${height}\".`,
+    "- Use editable vector primitives only: path, rect, circle, ellipse, line, polyline, polygon, g, defs, linearGradient, radialGradient.",
+    "- Do not embed raster images. Do not use <image>, foreignObject, base64, external href, CSS imports, script, animation, filters that depend on raster effects, or HTML.",
+    "- Preserve the icon/asset meaning, silhouette, approximate colors, visual weight, and orientation.",
+    "- Simplify noisy pixels, screenshot artifacts, shadows from neighboring UI, and blurry edges into clean vector shapes.",
+    "- Keep the result suitable for Figma editing: grouped shapes, reasonable path count, no tiny one-pixel fragments.",
+    "- Transparent background. No phone frame, no full app screen, no extra label text, no explanation.",
+    "",
+    "Return only raw SVG code. Do not wrap it in Markdown."
+  ].join("\n");
 }
 
 function toOpenAIImageSize(width, height) {

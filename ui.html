@@ -4371,7 +4371,7 @@ if(typeof define === 'function' && define.amd){
         }
         setBusy(true, `正在 AI 重绘 SVG：${asset.name}`);
         try {
-          const response = await fetch(`${PROXY_BASE_URL}/api/assets/ai-redraw`, {
+          const response = await fetch(`${PROXY_BASE_URL}/api/assets/redraw-svg`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -4386,15 +4386,11 @@ if(typeof define === 'function' && define.amd){
           if (!response.ok) {
             throw new Error(formatAiRedrawError(response.status, result.error));
           }
-          const image = Array.isArray(result.images) ? result.images[0] : null;
-          if (!image?.dataUrl) {
-            throw new Error("AI 重绘没有返回可转换底图");
+          if (!result.svg) {
+            throw new Error("AI 重绘没有返回 SVG");
           }
-          asset.dataUrl = image.dataUrl;
-          asset.transparent = Boolean(result.transparent);
           asset.aiRedrawn = true;
-          asset.svgData = null;
-          asset.svgData = await rasterAssetToEditableSvg(asset.dataUrl, asset.placement.width, asset.placement.height);
+          asset.svgData = normalizeVectorSvg(result.svg, asset.placement.width, asset.placement.height);
           activeSliceId = id;
           renderActiveResult(currentManifest);
           renderCutModules(currentManifest);
@@ -4408,7 +4404,7 @@ if(typeof define === 'function' && define.amd){
 
       function formatAiRedrawError(status, message) {
         if (status === 404) {
-          return "后端没有 AI 重绘接口，请停止旧的 npm run api 后重新启动";
+          return "后端没有 AI 重绘 SVG 接口，请停止旧的 npm run api 后重新启动";
         }
         return message || `AI 重绘接口失败：${status}`;
       }
@@ -4417,12 +4413,12 @@ if(typeof define === 'function' && define.amd){
         const width = asset?.placement?.width || 512;
         const height = asset?.placement?.height || 512;
         return [
-          `Redraw this sliced UI asset as a clean standalone asset named "${asset?.name || "ui_asset"}".`,
-          "Keep the original semantic meaning, silhouette, orientation, color family, and visual weight.",
-          "Remove screenshot noise, compression artifacts, text fragments, accidental background pixels, shadows from neighboring UI, and blurry edges.",
-          "Output a polished isolated UI icon or interface element on a transparent background.",
-          "Do not create a full app screen, mockup, phone frame, poster, or extra decoration.",
-          `Target canvas: ${width}x${height}px. Keep the asset centered with tight padding.`
+          `Redraw this sliced UI asset as an editable SVG named "${asset?.name || "ui_asset"}".`,
+          "Use the attached PNG only as visual reference.",
+          "Preserve the semantic meaning, silhouette, orientation, main colors, and visual weight.",
+          "Simplify screenshot noise, blur, shadows, text fragments, and neighboring UI artifacts into clean vector shapes.",
+          "Return raw SVG only, with transparent background and no embedded raster image.",
+          `Target viewBox: 0 0 ${width} ${height}. Keep the asset centered with tight padding.`
         ].join("\n");
       }
 

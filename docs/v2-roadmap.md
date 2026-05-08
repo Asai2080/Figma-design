@@ -614,4 +614,4 @@ P0 只做视觉上不突兀的遮盖，不承诺专业级图像修复。
 - 开始 SVG 实验能力：单个切图资产支持手动转 SVG，PNG 与 SVG 共存，Figma 回填失败时回退 PNG
 - 替换 SVG 实验转换引擎：停止自研像素/轮廓追踪，改为内置 ImageTracerJS；复杂素材路径过多时回退 PNG
 - 接入 P1 高质量 SVG 通路：本地后端新增 VTracer / @neplex/vectorizer 彩色矢量化接口，失败时前端回退 ImageTracerJS
-- 新增 AI 重绘 SVG 通路：在切图资产的 `转 SVG` 旁增加 `AI 重绘 SVG`，用当前供应商接口根据切片参考图生成重绘底图，再自动转换为 SVG；中间 PNG 仅作为内部转换底稿
+- 调整 AI 重绘 SVG 通路：在切图资产的 `转 SVG` 旁保留 `AI 重绘 SVG`，用当前供应商接口根据切片参考图直接生成可编辑 SVG；原 PNG 切图继续保留，SVG 作为同一资产的附加格式共存
