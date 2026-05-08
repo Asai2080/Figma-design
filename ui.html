@@ -1205,7 +1205,7 @@
 
       .cut-item {
         display: grid;
-        grid-template-columns: 42px 1fr auto auto auto auto auto;
+        grid-template-columns: 42px 1fr auto auto auto auto;
         gap: 8px;
         align-items: center;
         min-width: 0;
@@ -1268,8 +1268,7 @@
 
       .cut-transparent,
       .cut-svg,
-      .cut-redraw,
-      .cut-redraw-svg {
+      .cut-redraw {
         display: grid;
         place-items: center;
         min-width: 44px;
@@ -1293,11 +1292,6 @@
       }
 
       .cut-redraw.done {
-        color: #0f6c7a;
-        background: #e7f7fa;
-      }
-
-      .cut-redraw-svg.done {
         color: #5d3fc8;
         background: #f0edff;
       }
@@ -3969,8 +3963,7 @@ if(typeof define === 'function' && define.amd){
             </div>
             <button class="cut-transparent${asset.transparent ? " done" : ""}" type="button" data-transparent-slice="${asset.id}">${asset.transparent ? "已透明" : "透明"}</button>
             <button class="cut-svg${asset.svgData ? " done" : ""}" type="button" data-svg-slice="${asset.id}">${asset.svgData ? "SVG" : "转 SVG"}</button>
-            <button class="cut-redraw${asset.aiRedrawn ? " done" : ""}" type="button" data-redraw-slice="${asset.id}">${asset.aiRedrawn ? "已重绘" : "AI 重绘"}</button>
-            <button class="cut-redraw-svg${asset.aiRedrawn && asset.svgData ? " done" : ""}" type="button" data-redraw-svg-slice="${asset.id}">${asset.aiRedrawn && asset.svgData ? "重绘 SVG" : "重绘+SVG"}</button>
+            <button class="cut-redraw${asset.aiRedrawn && asset.svgData ? " done" : ""}" type="button" data-redraw-slice="${asset.id}">${asset.aiRedrawn && asset.svgData ? "AI SVG" : "AI 重绘 SVG"}</button>
             <button class="cut-remove" type="button" aria-label="删除 ${escapeHtml(asset.name)}" data-remove-slice="${asset.id}">×</button>
           </div>
         `).join("");
@@ -4004,13 +3997,7 @@ if(typeof define === 'function' && define.amd){
         cutGrid.querySelectorAll("[data-redraw-slice]").forEach((button) => {
           button.addEventListener("click", async (event) => {
             event.stopPropagation();
-            await redrawSliceWithAi(button.dataset.redrawSlice);
-          });
-        });
-        cutGrid.querySelectorAll("[data-redraw-svg-slice]").forEach((button) => {
-          button.addEventListener("click", async (event) => {
-            event.stopPropagation();
-            await redrawSliceWithAi(button.dataset.redrawSvgSlice, { convertToSvg: true });
+            await redrawSliceToSvg(button.dataset.redrawSlice);
           });
         });
       }
@@ -4377,13 +4364,12 @@ if(typeof define === 'function' && define.amd){
         }
       }
 
-      async function redrawSliceWithAi(id, options = {}) {
+      async function redrawSliceToSvg(id) {
         const asset = getActiveSliceAsset(id);
         if (!asset) {
           return;
         }
-        const shouldConvertToSvg = Boolean(options.convertToSvg);
-        setBusy(true, shouldConvertToSvg ? `正在 AI 重绘并转换 SVG：${asset.name}` : `正在 AI 重绘：${asset.name}`);
+        setBusy(true, `正在 AI 重绘 SVG：${asset.name}`);
         try {
           const response = await fetch(`${PROXY_BASE_URL}/api/assets/ai-redraw`, {
             method: "POST",
@@ -4398,39 +4384,33 @@ if(typeof define === 'function' && define.amd){
           });
           const result = await response.json().catch(() => ({}));
           if (!response.ok) {
-            throw new Error(result.error || `AI 重绘失败：${response.status}`);
+            throw new Error(formatAiRedrawError(response.status, result.error));
           }
           const image = Array.isArray(result.images) ? result.images[0] : null;
           if (!image?.dataUrl) {
-            throw new Error("AI 重绘没有返回图片");
+            throw new Error("AI 重绘没有返回可转换底图");
           }
           asset.dataUrl = image.dataUrl;
           asset.transparent = Boolean(result.transparent);
           asset.aiRedrawn = true;
           asset.svgData = null;
-          let svgConversionError = null;
-          if (shouldConvertToSvg) {
-            try {
-              asset.svgData = await rasterAssetToEditableSvg(asset.dataUrl, asset.placement.width, asset.placement.height);
-            } catch (error) {
-              svgConversionError = error;
-            }
-          }
+          asset.svgData = await rasterAssetToEditableSvg(asset.dataUrl, asset.placement.width, asset.placement.height);
           activeSliceId = id;
           renderActiveResult(currentManifest);
           renderCutModules(currentManifest);
-          if (svgConversionError) {
-            setStatus(`已 AI 重绘 PNG，但 SVG 转换失败：${svgConversionError.message || String(svgConversionError)}`, true);
-          } else {
-            setStatus(shouldConvertToSvg
-              ? `已 AI 重绘并生成 SVG：${asset.name}。如果 SVG 效果不好，仍可保留 PNG。`
-              : `已 AI 重绘：${asset.name}。如果需要 SVG，可以再点“转 SVG”。`);
-          }
+          setStatus(`已生成 AI 重绘 SVG：${asset.name}。`);
         } catch (error) {
-          setStatus(`${shouldConvertToSvg ? "AI 重绘+SVG" : "AI 重绘"}失败：${error.message || String(error)}`, true);
+          setStatus(`AI 重绘 SVG 失败：${error.message || String(error)}`, true);
         } finally {
           setBusy(false);
         }
+      }
+
+      function formatAiRedrawError(status, message) {
+        if (status === 404) {
+          return "后端没有 AI 重绘接口，请停止旧的 npm run api 后重新启动";
+        }
+        return message || `AI 重绘接口失败：${status}`;
       }
 
       function buildAiRedrawPrompt(asset) {
