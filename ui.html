@@ -4413,17 +4413,18 @@ if(typeof define === 'function' && define.amd){
         const width = asset?.placement?.width || 512;
         const height = asset?.placement?.height || 512;
         return [
-          `Redraw this sliced UI asset as an editable SVG named "${asset?.name || "ui_asset"}".`,
-          "Use the attached PNG as the source of truth, not just loose inspiration.",
-          "Create a 1:1 similarity-first vector recreation, not a redesign, restyle, simplification, or icon-set normalization.",
-          "Silently inspect and preserve the visual inventory: silhouette lobes/parts, facial features, accessories, decorative marks, motion lines, highlights, shadows, overlap order, angles, spacing, scale, asymmetry, and crop padding.",
-          "Preserve distinctive details such as irregular puffy outlines, organic curves, inner highlights, soft shaded patches, facial features, accessory geometry, motion streaks, sparkles, small decorations, layered blobs, cast shadows, and asymmetrical contours when present.",
-          "Accessories such as sunglasses, badges, hands, arrows, stars, or facial marks must keep their source angle, thickness, placement, and expression.",
-          "Clean only screenshot noise, blur, background contamination, text fragments, and neighboring UI artifacts.",
-          "Do not replace it with a generic simplified icon. Do not make it cleaner by deleting personality details.",
-          "Use cubic Bezier paths, layered translucent shapes, gradients, opacity, and grouped paths to preserve the original illustration richness.",
-          "Return raw SVG only, with transparent background and no embedded raster image.",
-          `Target viewBox: 0 0 ${width} ${height}. Keep the asset centered with tight padding.`
+          `Vectorize this sliced UI icon asset as an editable SVG named "${asset?.name || "ui_asset"}".`,
+          "Use the attached PNG as the only source of truth. The result should look carefully traced and vectorized, not redesigned.",
+          "Core principles: 1:1 similarity first, faithful restoration first, no redesign, no style change, no key-structure simplification, no added elements, no generic replacement icon.",
+          "Silently analyze the icon type, main contour blocks, subject position, scale, padding, direction, tilt, visual weight, asymmetry, internal highlights, shadows, facets, cutouts, lines, decoration, layer order, and color relationships.",
+          "The outer silhouette is mandatory and must closely match the source. Preserve rounded corners, sharp corners, concave/convex areas, notches, tilt, asymmetry, and special curves.",
+          "For abstract icons and symbols, prioritize geometric contour accuracy over illustration style. Do not round, blobify, inflate, smooth, or regularize the shape unless the source does.",
+          "Keep only details actually present in the source. Preserve highlight and gradient placement, internal white/negative shapes, shadow strength, detail size, angle, and layer order.",
+          "Clean only screenshot noise, blur, compression artifacts, background contamination, and neighboring UI fragments.",
+          "Match source colors, gradient direction, opacity, highlights, and dark areas. If the source is flat color, keep it flat.",
+          "Use editable path/circle/rect/ellipse/polygon/line/g/defs/linearGradient/radialGradient/mask/clipPath elements. Prefer Bezier paths for main contours.",
+          "Do not embed raster images, base64, external href, HTML, foreignObject, CSS imports, script, or animation.",
+          `Return raw SVG only. Transparent background. Use viewBox: 0 0 ${width} ${height}. Preserve the original crop padding and do not arbitrarily fill the canvas.`
         ].join("\n");
       }
 
