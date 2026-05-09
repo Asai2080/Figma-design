@@ -1190,6 +1190,10 @@
         padding-right: 2px;
       }
 
+      .cut-grid.menu-open {
+        overflow: visible;
+      }
+
       .cut-empty {
         grid-column: 1 / -1;
         display: grid;
@@ -1205,7 +1209,7 @@
 
       .cut-item {
         display: grid;
-        grid-template-columns: 42px 1fr auto auto auto auto auto;
+        grid-template-columns: 42px 1fr auto auto auto;
         gap: 8px;
         align-items: center;
         min-width: 0;
@@ -1213,6 +1217,7 @@
         border: 1px solid #e7e8ef;
         border-radius: 8px;
         background: #ffffff;
+        position: relative;
       }
 
       .cut-item.active {
@@ -1266,6 +1271,19 @@
         font-size: 16px;
       }
 
+      .cut-action-menu {
+        position: relative;
+      }
+
+      .cut-action-menu summary {
+        list-style: none;
+      }
+
+      .cut-action-menu summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .cut-action-trigger,
       .cut-transparent,
       .cut-ai-transparent,
       .cut-svg,
@@ -1280,6 +1298,43 @@
         background: #f4f5f7;
         font-size: 10px;
         font-weight: 760;
+      }
+
+      .cut-action-trigger {
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .cut-action-menu[open] .cut-action-trigger {
+        color: #ffffff;
+        background: #111318;
+      }
+
+      .cut-action-list {
+        position: absolute;
+        top: calc(100% + 6px);
+        right: 0;
+        z-index: 10;
+        display: grid;
+        min-width: 88px;
+        padding: 4px;
+        border: 1px solid #e1e3ea;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: 0 12px 30px rgba(17, 19, 24, 0.14);
+      }
+
+      .cut-action-list button {
+        justify-content: start;
+        width: 100%;
+        min-width: 0;
+        border-radius: 6px;
+        background: transparent;
+        white-space: nowrap;
+      }
+
+      .cut-action-list button:hover {
+        background: #f4f5f7;
       }
 
       .cut-transparent.done {
@@ -3967,13 +4022,44 @@ if(typeof define === 'function' && define.amd){
               <span class="cut-name">${index + 1}. ${escapeHtml(asset.name)}</span>
               <span class="cut-size">${asset.placement.width} × ${asset.placement.height}${asset.transparent ? " · 透明 PNG" : ""}${asset.aiTransparent ? " · AI 透明" : ""}${asset.svgData ? " · SVG" : ""}${asset.aiRedrawn ? " · AI 重绘" : ""}</span>
             </div>
-            <button class="cut-transparent${asset.transparent ? " done" : ""}" type="button" data-transparent-slice="${asset.id}">${asset.transparent ? "已透明" : "透明"}</button>
-            <button class="cut-ai-transparent${asset.aiTransparent ? " done" : ""}" type="button" data-ai-transparent-slice="${asset.id}">AI透明</button>
-            <button class="cut-svg${asset.svgData ? " done" : ""}" type="button" data-svg-slice="${asset.id}">${asset.svgData ? "SVG" : "转 SVG"}</button>
-            <button class="cut-redraw${asset.aiRedrawn && asset.svgData ? " done" : ""}" type="button" data-redraw-slice="${asset.id}">${asset.aiRedrawn && asset.svgData ? "AI SVG" : "AI 重绘 SVG"}</button>
+            <details class="cut-action-menu">
+              <summary class="cut-action-trigger">透明</summary>
+              <div class="cut-action-list">
+                <button class="cut-transparent${asset.transparent && !asset.aiTransparent ? " done" : ""}" type="button" data-transparent-slice="${asset.id}">${asset.transparent && !asset.aiTransparent ? "已透明" : "透明"}</button>
+                <button class="cut-ai-transparent${asset.aiTransparent ? " done" : ""}" type="button" data-ai-transparent-slice="${asset.id}">${asset.aiTransparent ? "AI已透明" : "AI透明"}</button>
+              </div>
+            </details>
+            <details class="cut-action-menu">
+              <summary class="cut-action-trigger">SVG</summary>
+              <div class="cut-action-list">
+                <button class="cut-svg${asset.svgData && !asset.aiRedrawn ? " done" : ""}" type="button" data-svg-slice="${asset.id}">${asset.svgData && !asset.aiRedrawn ? "SVG" : "转 SVG"}</button>
+                <button class="cut-redraw${asset.aiRedrawn && asset.svgData ? " done" : ""}" type="button" data-redraw-slice="${asset.id}">${asset.aiRedrawn && asset.svgData ? "AI SVG" : "AI 重绘 SVG"}</button>
+              </div>
+            </details>
             <button class="cut-remove" type="button" aria-label="删除 ${escapeHtml(asset.name)}" data-remove-slice="${asset.id}">×</button>
           </div>
         `).join("");
+        cutGrid.querySelectorAll(".cut-action-menu").forEach((menu) => {
+          menu.addEventListener("click", (event) => {
+            event.stopPropagation();
+          });
+          menu.addEventListener("toggle", () => {
+            if (menu.open) {
+              cutGrid.querySelectorAll(".cut-action-menu[open]").forEach((otherMenu) => {
+                if (otherMenu !== menu) {
+                  otherMenu.open = false;
+                }
+              });
+            }
+            requestAnimationFrame(() => {
+              if (cutGrid.querySelector(".cut-action-menu[open]")) {
+                cutGrid.classList.add("menu-open");
+              } else {
+                cutGrid.classList.remove("menu-open");
+              }
+            });
+          });
+        });
         cutGrid.querySelectorAll("[data-slice-id]").forEach((item) => {
           item.addEventListener("click", (event) => {
             if (event.target.closest("[data-remove-slice]")) {
@@ -3992,24 +4078,28 @@ if(typeof define === 'function' && define.amd){
         cutGrid.querySelectorAll("[data-transparent-slice]").forEach((button) => {
           button.addEventListener("click", async (event) => {
             event.stopPropagation();
+            button.closest(".cut-action-menu")?.removeAttribute("open");
             await makeSliceTransparent(button.dataset.transparentSlice);
           });
         });
         cutGrid.querySelectorAll("[data-ai-transparent-slice]").forEach((button) => {
           button.addEventListener("click", async (event) => {
             event.stopPropagation();
+            button.closest(".cut-action-menu")?.removeAttribute("open");
             await makeSliceAiTransparent(button.dataset.aiTransparentSlice);
           });
         });
         cutGrid.querySelectorAll("[data-svg-slice]").forEach((button) => {
           button.addEventListener("click", async (event) => {
             event.stopPropagation();
+            button.closest(".cut-action-menu")?.removeAttribute("open");
             await convertSliceToSvg(button.dataset.svgSlice);
           });
         });
         cutGrid.querySelectorAll("[data-redraw-slice]").forEach((button) => {
           button.addEventListener("click", async (event) => {
             event.stopPropagation();
+            button.closest(".cut-action-menu")?.removeAttribute("open");
             await redrawSliceToSvg(button.dataset.redrawSlice);
           });
         });
