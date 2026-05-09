@@ -1205,7 +1205,7 @@
 
       .cut-item {
         display: grid;
-        grid-template-columns: 42px 1fr auto auto auto auto;
+        grid-template-columns: 42px 1fr auto auto auto auto auto;
         gap: 8px;
         align-items: center;
         min-width: 0;
@@ -1267,6 +1267,7 @@
       }
 
       .cut-transparent,
+      .cut-ai-transparent,
       .cut-svg,
       .cut-redraw {
         display: grid;
@@ -1284,6 +1285,11 @@
       .cut-transparent.done {
         color: #1d7a46;
         background: #eaf7ef;
+      }
+
+      .cut-ai-transparent.done {
+        color: #096b72;
+        background: #e8f7f8;
       }
 
       .cut-svg.done {
@@ -3959,9 +3965,10 @@ if(typeof define === 'function' && define.amd){
             <img class="cut-thumb" src="${asset.dataUrl}" alt="${escapeHtml(asset.name)}" />
             <div class="cut-meta">
               <span class="cut-name">${index + 1}. ${escapeHtml(asset.name)}</span>
-              <span class="cut-size">${asset.placement.width} × ${asset.placement.height}${asset.transparent ? " · 透明 PNG" : ""}${asset.svgData ? " · SVG" : ""}${asset.aiRedrawn ? " · AI 重绘" : ""}</span>
+              <span class="cut-size">${asset.placement.width} × ${asset.placement.height}${asset.transparent ? " · 透明 PNG" : ""}${asset.aiTransparent ? " · AI 透明" : ""}${asset.svgData ? " · SVG" : ""}${asset.aiRedrawn ? " · AI 重绘" : ""}</span>
             </div>
             <button class="cut-transparent${asset.transparent ? " done" : ""}" type="button" data-transparent-slice="${asset.id}">${asset.transparent ? "已透明" : "透明"}</button>
+            <button class="cut-ai-transparent${asset.aiTransparent ? " done" : ""}" type="button" data-ai-transparent-slice="${asset.id}">AI透明</button>
             <button class="cut-svg${asset.svgData ? " done" : ""}" type="button" data-svg-slice="${asset.id}">${asset.svgData ? "SVG" : "转 SVG"}</button>
             <button class="cut-redraw${asset.aiRedrawn && asset.svgData ? " done" : ""}" type="button" data-redraw-slice="${asset.id}">${asset.aiRedrawn && asset.svgData ? "AI SVG" : "AI 重绘 SVG"}</button>
             <button class="cut-remove" type="button" aria-label="删除 ${escapeHtml(asset.name)}" data-remove-slice="${asset.id}">×</button>
@@ -3986,6 +3993,12 @@ if(typeof define === 'function' && define.amd){
           button.addEventListener("click", async (event) => {
             event.stopPropagation();
             await makeSliceTransparent(button.dataset.transparentSlice);
+          });
+        });
+        cutGrid.querySelectorAll("[data-ai-transparent-slice]").forEach((button) => {
+          button.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            await makeSliceAiTransparent(button.dataset.aiTransparentSlice);
           });
         });
         cutGrid.querySelectorAll("[data-svg-slice]").forEach((button) => {
@@ -4269,9 +4282,13 @@ if(typeof define === 'function' && define.amd){
           type: "manual_slice",
           placement,
           transparent: false,
+          aiTransparent: false,
           aiRedrawn: false,
           selected: true,
+          originalDataUrl: dataUrl,
           dataUrl,
+          transparentDataUrl: null,
+          aiTransparentDataUrl: null,
           svgData: null,
           ...repair
         };
@@ -4290,7 +4307,11 @@ if(typeof define === 'function' && define.amd){
         }
         asset.dataUrl = await cropImageRegion(activeImage.dataUrl, asset.placement);
         Object.assign(asset, await createSliceRepairPatch(activeImage.dataUrl, asset.placement));
+        asset.originalDataUrl = asset.dataUrl;
+        asset.transparentDataUrl = null;
+        asset.aiTransparentDataUrl = null;
         asset.transparent = false;
+        asset.aiTransparent = false;
         asset.aiRedrawn = false;
         asset.svgData = null;
       }
@@ -4302,8 +4323,11 @@ if(typeof define === 'function' && define.amd){
         }
         setBusy(true, `正在处理透明底：${asset.name}`);
         try {
+          asset.originalDataUrl = asset.originalDataUrl || asset.dataUrl;
           asset.dataUrl = await removeEdgeBackground(asset.dataUrl);
+          asset.transparentDataUrl = asset.dataUrl;
           asset.transparent = true;
+          asset.aiTransparent = false;
           activeSliceId = id;
           renderActiveResult(currentManifest);
           renderCutModules(currentManifest);
@@ -4330,8 +4354,11 @@ if(typeof define === 'function' && define.amd){
         transparentAllButton.disabled = true;
         try {
           for (const asset of pendingAssets) {
+            asset.originalDataUrl = asset.originalDataUrl || asset.dataUrl;
             asset.dataUrl = await removeEdgeBackground(asset.dataUrl);
+            asset.transparentDataUrl = asset.dataUrl;
             asset.transparent = true;
+            asset.aiTransparent = false;
           }
           activeSliceId = pendingAssets[pendingAssets.length - 1].id;
           renderActiveResult(currentManifest);
@@ -4340,6 +4367,51 @@ if(typeof define === 'function' && define.amd){
         } catch (error) {
           renderCutModules(currentManifest);
           setStatus(`批量透明化失败：${error.message || String(error)}`, true);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function makeSliceAiTransparent(id) {
+        const asset = getActiveSliceAsset(id);
+        if (!asset) {
+          return;
+        }
+        setBusy(true, `正在 AI 生成透明底：${asset.name}`);
+        try {
+          asset.originalDataUrl = asset.originalDataUrl || asset.dataUrl;
+          const response = await fetch(`${PROXY_BASE_URL}/api/assets/ai-redraw`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              dataUrl: asset.originalDataUrl,
+              name: asset.name,
+              width: asset.placement.width,
+              height: asset.placement.height,
+              prompt: buildAiTransparentPrompt(asset),
+              quality: "high"
+            })
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(result.error || `AI transparent request failed: ${response.status}`);
+          }
+          const image = result.images && result.images[0];
+          if (!image?.dataUrl) {
+            throw new Error("AI 透明没有返回图片");
+          }
+          asset.aiTransparentDataUrl = image.dataUrl;
+          asset.dataUrl = image.dataUrl;
+          asset.transparent = true;
+          asset.aiTransparent = true;
+          asset.aiRedrawn = false;
+          asset.svgData = null;
+          activeSliceId = id;
+          renderActiveResult(currentManifest);
+          renderCutModules(currentManifest);
+          setStatus(`已生成 AI 透明 PNG：${asset.name}。原切图仍保留。`);
+        } catch (error) {
+          setStatus(`AI 透明 PNG 失败：${error.message || String(error)}`, true);
         } finally {
           setBusy(false);
         }
@@ -4425,6 +4497,18 @@ if(typeof define === 'function' && define.amd){
           "Use editable path/circle/rect/ellipse/polygon/line/g/defs/linearGradient/radialGradient/mask/clipPath elements. Prefer Bezier paths for main contours.",
           "Do not embed raster images, base64, external href, HTML, foreignObject, CSS imports, script, or animation.",
           `Return raw SVG only. Transparent background. Use viewBox: 0 0 ${width} ${height}. Preserve the original crop padding and do not arbitrarily fill the canvas.`
+        ].join("\n");
+      }
+
+      function buildAiTransparentPrompt(asset) {
+        return [
+          `Create a clean transparent PNG version of the sliced UI asset named "${asset?.name || "ui_asset"}".`,
+          "Use the attached PNG as the only source of truth.",
+          "Keep the asset category, silhouette, colors, visual weight, angle, and key details close to the source.",
+          "Remove the surrounding UI background, neighboring elements, screenshot noise, compression artifacts, dirty edges, halos, and color contamination.",
+          "Preserve the original icon or component itself. Do not redesign it, do not add new elements, and do not place it inside a phone screen, card, mockup, or poster.",
+          "Output exactly one isolated UI asset on a transparent background.",
+          "Keep soft antialiased edges. Avoid jagged cutouts, hard square patches, white boxes, grey backplates, or leftover background pixels."
         ].join("\n");
       }
 
@@ -5164,7 +5248,9 @@ if(typeof define === 'function' && define.amd){
             format: "png",
             formats: asset.svgData ? ["png", "svg"] : ["png"],
             transparent: Boolean(asset.transparent),
+            aiTransparent: Boolean(asset.aiTransparent),
             aiRedrawn: Boolean(asset.aiRedrawn),
+            hasOriginalRaster: Boolean(asset.originalDataUrl),
             selectedImageIndex: imageIndex,
             placement: { ...asset.placement }
           };
