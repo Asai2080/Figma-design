@@ -30,6 +30,7 @@ let openaiApiKey = providerConfigs[activeProvider].apiKey || process.env.OPENAI_
 let openaiImageModel = providerConfigs[activeProvider].model || process.env.OPENAI_IMAGE_MODEL || PROVIDER_DEFAULTS[activeProvider].model;
 let openaiBaseUrl = providerConfigs[activeProvider].baseUrl || process.env.OPENAI_BASE_URL || PROVIDER_DEFAULTS[activeProvider].baseUrl;
 let vectorizerModulePromise = null;
+let sharpModulePromise = null;
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -522,6 +523,7 @@ async function requestSvgChatCompletion({ prompt, dataUrl, name }) {
 async function vectorizeAsset(payload) {
   const dataUrl = assertString(payload.dataUrl, "dataUrl");
   const imageBuffer = dataUrlToBuffer(dataUrl);
+  const { buffer: vectorImageBuffer, info: preprocessInfo } = await preprocessImageForVectorization(imageBuffer);
   const {
     vectorize,
     ColorMode,
@@ -529,18 +531,18 @@ async function vectorizeAsset(payload) {
     PathSimplifyMode
   } = await loadVectorizerModule();
 
-  const svg = await vectorize(imageBuffer, {
+  const svg = await vectorize(vectorImageBuffer, {
     colorMode: ColorMode.Color,
     colorPrecision: 7,
-    filterSpeckle: 4,
-    spliceThreshold: 45,
-    cornerThreshold: 60,
+    filterSpeckle: 8,
+    spliceThreshold: 55,
+    cornerThreshold: 68,
     hierarchical: Hierarchical.Stacked,
     mode: PathSimplifyMode.Spline,
-    layerDifference: 5,
-    lengthThreshold: 4,
-    maxIterations: 2,
-    pathPrecision: 5
+    layerDifference: 8,
+    lengthThreshold: 6,
+    maxIterations: 3,
+    pathPrecision: 4
   });
 
   const pathCount = (svg.match(/<path/g) || []).length;
@@ -554,9 +556,67 @@ async function vectorizeAsset(payload) {
   return {
     ok: true,
     engine: "vtracer",
+    preprocess: preprocessInfo,
     pathCount,
     svg
   };
+}
+
+async function preprocessImageForVectorization(imageBuffer) {
+  try {
+    const sharp = await loadSharpModule();
+    const image = sharp(imageBuffer, {
+      animated: false,
+      failOn: "none",
+      limitInputPixels: false
+    }).rotate().ensureAlpha();
+    const metadata = await image.metadata();
+    const width = metadata.width || 0;
+    const height = metadata.height || 0;
+    if (!width || !height) {
+      return { buffer: imageBuffer, info: { applied: false, reason: "missing-size" } };
+    }
+
+    const longest = Math.max(width, height);
+    const targetLongest = longest < 384 ? Math.min(768, longest * 3) : Math.min(1400, longest);
+    const scale = targetLongest > longest ? targetLongest / longest : 1;
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+
+    let pipeline = image;
+    if (scale > 1.01) {
+      pipeline = pipeline.resize({
+        width: targetWidth,
+        height: targetHeight,
+        fit: "fill",
+        kernel: sharp.kernel.lanczos3
+      });
+    }
+
+    const buffer = await pipeline
+      .median(1)
+      .blur(0.18)
+      .png({
+        compressionLevel: 9,
+        adaptiveFiltering: true
+      })
+      .toBuffer();
+
+    return {
+      buffer,
+      info: {
+        applied: true,
+        width,
+        height,
+        targetWidth,
+        targetHeight,
+        scale: Number(scale.toFixed(2))
+      }
+    };
+  } catch (error) {
+    console.warn(`Vectorize preprocessing skipped: ${error.message}`);
+    return { buffer: imageBuffer, info: { applied: false, reason: error.message } };
+  }
 }
 
 function loadVectorizerModule() {
@@ -564,6 +624,13 @@ function loadVectorizerModule() {
     vectorizerModulePromise = import("@neplex/vectorizer");
   }
   return vectorizerModulePromise;
+}
+
+function loadSharpModule() {
+  if (!sharpModulePromise) {
+    sharpModulePromise = import("sharp").then((module) => module.default || module);
+  }
+  return sharpModulePromise;
 }
 
 async function generateOpenRouterImages({ prompt, count, width, height, images = [] }) {

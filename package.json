@@ -10,6 +10,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@neplex/vectorizer": "^0.0.5"
+    "@neplex/vectorizer": "^0.0.5",
+    "sharp": "^0.34.5"
   }
 }
