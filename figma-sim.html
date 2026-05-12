@@ -189,6 +189,10 @@
         if (message.type === "create-ui-asset-screen") {
           renderManifest(message.manifest);
         }
+
+        if (message.type === "create-editable-design-screen") {
+          renderEditableManifest(message.manifest);
+        }
       });
 
       function restorePluginWindowState() {
@@ -291,6 +295,53 @@
 
         stage.appendChild(frame);
         status.textContent = `${manifest.assets.filter((item) => item.selected !== false).length} 个透明 PNG 已回填`;
+      }
+
+      function renderEditableManifest(manifest) {
+        const maxWidth = stage.clientWidth - 44;
+        const maxHeight = stage.clientHeight - 44;
+        const scale = Math.min(maxWidth / manifest.screen.width, maxHeight / manifest.screen.height, 1);
+        const frameWidth = Math.round(manifest.screen.width * scale);
+        const frameHeight = Math.round(manifest.screen.height * scale);
+
+        stage.innerHTML = "";
+        const frame = document.createElement("div");
+        frame.className = "mock-frame";
+        frame.style.width = `${frameWidth}px`;
+        frame.style.height = `${frameHeight}px`;
+        frame.style.background = manifest.screen.fill || "#f6f8fb";
+
+        for (const node of manifest.nodes || []) {
+          frame.appendChild(renderEditableNode(node, scale));
+        }
+
+        stage.appendChild(frame);
+        status.textContent = `${(manifest.nodes || []).length} 个可编辑节点已模拟回填`;
+      }
+
+      function renderEditableNode(node, scale) {
+        const element = document.createElement(node.type === "text" ? "div" : "div");
+        element.className = `editable-node editable-${node.type || "rect"}`;
+        element.style.position = "absolute";
+        element.style.left = `${Math.round((node.x || 0) * scale)}px`;
+        element.style.top = `${Math.round((node.y || 0) * scale)}px`;
+        element.style.width = `${Math.round((node.width || 1) * scale)}px`;
+        element.style.height = `${Math.round((node.height || 1) * scale)}px`;
+        element.style.borderRadius = `${Math.round((node.radius || 0) * scale)}px`;
+        element.style.background = node.fill || "transparent";
+        element.style.overflow = "hidden";
+        if (node.type === "text") {
+          element.textContent = node.text || "";
+          element.style.color = node.color || "#111318";
+          element.style.fontSize = `${Math.max(8, Math.round((node.fontSize || 16) * scale))}px`;
+          element.style.fontWeight = String(node.fontWeight || 500);
+          element.style.lineHeight = `${Math.max(10, Math.round((node.lineHeight || node.fontSize || 18) * scale))}px`;
+          element.style.background = "transparent";
+        }
+        for (const child of node.children || []) {
+          element.appendChild(renderEditableNode(child, scale));
+        }
+        return element;
       }
     </script>
   </body>

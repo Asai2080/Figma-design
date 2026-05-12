@@ -762,6 +762,92 @@
         background: var(--accent);
       }
 
+      .place-dialog {
+        position: fixed;
+        inset: 0;
+        z-index: 80;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: rgba(17, 19, 24, 0.18);
+        backdrop-filter: blur(8px);
+      }
+
+      .place-dialog.open {
+        display: flex;
+      }
+
+      .place-dialog-card {
+        width: min(520px, 100%);
+        padding: 22px;
+        border: 1px solid #e8ebf1;
+        border-radius: 20px;
+        background: #ffffff;
+        box-shadow: 0 24px 70px rgba(20, 24, 36, 0.18);
+      }
+
+      .place-dialog-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .place-dialog-head strong {
+        font-size: 22px;
+        font-weight: 850;
+      }
+
+      .place-dialog-close {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        background: #f3f4f7;
+        color: #6d7280;
+        font-size: 26px;
+        font-weight: 800;
+      }
+
+      .place-option-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .place-option {
+        display: grid;
+        gap: 6px;
+        width: 100%;
+        padding: 18px;
+        border: 1px solid #e4e7ee;
+        border-radius: 16px;
+        background: #ffffff;
+        text-align: left;
+      }
+
+      .place-option:hover {
+        border-color: #111318;
+        box-shadow: 0 12px 28px rgba(20, 24, 36, 0.08);
+      }
+
+      .place-option strong {
+        font-size: 17px;
+        font-weight: 850;
+        color: #171a22;
+      }
+
+      .place-option span {
+        color: #7b8190;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.45;
+      }
+
+      .place-option.experiment {
+        background: #fbfbfc;
+      }
+
       .result-view {
         display: flex;
         flex-direction: column;
@@ -1874,6 +1960,24 @@
             </section>
           </div>
         </section>
+      </section>
+      <section id="placeDialog" class="place-dialog" aria-modal="true" aria-label="选择放入 Figma 的方式">
+        <div class="place-dialog-card">
+          <div class="place-dialog-head">
+            <strong>放入 Figma</strong>
+            <button id="placeDialogClose" class="place-dialog-close" type="button" aria-label="关闭">×</button>
+          </div>
+          <div class="place-option-grid">
+            <button id="placeSourceOption" class="place-option" type="button">
+              <strong>源文件</strong>
+              <span>保持当前逻辑不变，把生成图和切图资产放入 Figma，稳定保真。</span>
+            </button>
+            <button id="placeEditableOption" class="place-option experiment" type="button">
+              <strong>可编辑设计稿（实验）</strong>
+              <span>尝试把当前生成图还原成 HTML/CSS，再创建可编辑 Figma 图层。可能存在还原偏差。</span>
+            </button>
+          </div>
+        </div>
       </section>
       <div id="windowResizer" class="window-resizer" title="拖拽调整窗口大小" aria-hidden="true"></div>
     </main>
@@ -3115,6 +3219,10 @@ if(typeof define === 'function' && define.amd){
       const generateButton = document.getElementById("generate");
       const sliceModeButton = document.getElementById("sliceMode");
       const placeButton = document.getElementById("place");
+      const placeDialog = document.getElementById("placeDialog");
+      const placeDialogClose = document.getElementById("placeDialogClose");
+      const placeSourceOption = document.getElementById("placeSourceOption");
+      const placeEditableOption = document.getElementById("placeEditableOption");
       const downloadAllButton = document.getElementById("downloadAll");
       const resultGrid = document.getElementById("resultGrid");
       const resultCount = document.getElementById("resultCount");
@@ -3480,32 +3588,24 @@ if(typeof define === 'function' && define.amd){
         if (!currentManifest) {
           return;
         }
-        if (!isEmbeddedPluginHost()) {
-          setStatus("当前是直接打开的 ui.html 页面；“放入 Figma”只有在 Figma 插件窗口或模拟器里才会创建画布。", true);
-          return;
-        }
+        openPlaceDialog();
+      });
 
-        setBusy(true, "正在准备回填到 Figma...");
-        let placementManifest;
-        try {
-          placementManifest = await buildPlacementManifest(currentManifest);
-        } catch (error) {
-          setBusy(false);
-          setStatus(`放入 Figma 失败：${error.message || String(error)}`, true);
-          return;
+      placeDialogClose.addEventListener("click", closePlaceDialog);
+      placeDialog.addEventListener("click", (event) => {
+        if (event.target === placeDialog) {
+          closePlaceDialog();
         }
+      });
 
-        parent.postMessage(
-          {
-            pluginMessage: {
-              type: "create-ui-asset-screen",
-              manifest: placementManifest
-            }
-          },
-          "*"
-        );
-        setBusy(false);
-        setStatus("已发送到 Figma 画布。");
+      placeSourceOption.addEventListener("click", async () => {
+        closePlaceDialog();
+        await placeSourceInFigma();
+      });
+
+      placeEditableOption.addEventListener("click", async () => {
+        closePlaceDialog();
+        await placeEditableDesignInFigma();
       });
 
       downloadAllButton.addEventListener("click", () => {
@@ -5289,6 +5389,110 @@ if(typeof define === 'function' && define.amd){
           previewImage: { dataUrl: previewDataUrl || activeImage?.dataUrl || manifest.previewImage.dataUrl },
           assets
         };
+      }
+
+      function openPlaceDialog() {
+        if (!currentManifest) {
+          return;
+        }
+        placeDialog.classList.add("open");
+      }
+
+      function closePlaceDialog() {
+        placeDialog.classList.remove("open");
+      }
+
+      async function placeSourceInFigma() {
+        if (!currentManifest) {
+          return;
+        }
+        if (!isEmbeddedPluginHost()) {
+          setStatus("当前是直接打开的 ui.html 页面；“放入 Figma”只有在 Figma 插件窗口或模拟器里才会创建画布。", true);
+          return;
+        }
+
+        setBusy(true, "正在准备源文件回填到 Figma...");
+        let placementManifest;
+        try {
+          placementManifest = await buildPlacementManifest(currentManifest);
+        } catch (error) {
+          setBusy(false);
+          setStatus(`放入 Figma 失败：${error.message || String(error)}`, true);
+          return;
+        }
+
+        parent.postMessage(
+          {
+            pluginMessage: {
+              type: "create-ui-asset-screen",
+              manifest: placementManifest
+            }
+          },
+          "*"
+        );
+        setBusy(false);
+        setStatus("已按源文件方式发送到 Figma 画布。");
+      }
+
+      async function placeEditableDesignInFigma() {
+        if (!currentManifest) {
+          return;
+        }
+        if (!isEmbeddedPluginHost()) {
+          setStatus("当前是直接打开的 ui.html 页面；“可编辑设计稿”只有在 Figma 插件窗口或模拟器里才会创建画布。", true);
+          return;
+        }
+
+        setBusy(true, "正在生成可编辑设计稿实验图层...");
+        try {
+          const manifest = await buildEditableDesignManifest();
+          parent.postMessage(
+            {
+              pluginMessage: {
+                type: "create-editable-design-screen",
+                manifest
+              }
+            },
+            "*"
+          );
+          setStatus("已发送可编辑设计稿实验图层到 Figma。");
+        } catch (error) {
+          setStatus(`可编辑设计稿导入失败：${error.message || String(error)}`, true);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function buildEditableDesignManifest() {
+        const activeImage = getActiveResultImage();
+        if (!activeImage?.dataUrl) {
+          throw new Error("没有可还原的当前设计稿");
+        }
+
+        const response = await fetch(`${PROXY_BASE_URL}/api/design/reconstruct-html`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageDataUrl: activeImage.dataUrl,
+            sourceImageName: activeImage.id || `design-${activeResultIndex + 1}.png`,
+            prompt: promptInput.value.trim() || currentManifest.sourcePrompt || "",
+            width: currentManifest.screen.width,
+            height: currentManifest.screen.height,
+            ratio: currentRatio,
+            provider: activeProvider
+          })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(result.error || `Editable design request failed: ${response.status}`);
+        }
+        if (!result.manifest) {
+          throw new Error("后端没有返回可编辑设计稿 manifest");
+        }
+        if (result.warning) {
+          setStatus(result.warning, true);
+        }
+        return result.manifest;
       }
 
       async function createRepairedPreviewImage(activeImage) {

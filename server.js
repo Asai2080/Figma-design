@@ -174,6 +174,13 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && request.url === "/api/design/reconstruct-html") {
+      const payload = await readJson(request);
+      const result = await reconstructEditableDesign(payload);
+      sendJson(response, 200, result);
+      return;
+    }
+
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     const status = error.statusCode || 500;
@@ -879,6 +886,377 @@ async function normalizeImageResponse(data) {
   return { images };
 }
 
+async function reconstructEditableDesign(payload) {
+  const prompt = assertString(payload.prompt || "Generate an app UI screen.", "prompt");
+  const width = clampNumber(payload.width || 390, 256, 4096);
+  const height = clampNumber(payload.height || 844, 256, 4096);
+  const imageDataUrl = typeof payload.imageDataUrl === "string" ? payload.imageDataUrl : "";
+  const sourceImage = imageDataUrl
+    ? {
+        dataUrl: imageDataUrl,
+        name: payload.sourceImageName || "source_ui_reference.png"
+      }
+    : null;
+
+  let html = buildFallbackEditableDesignHtml({ prompt, width, height });
+  let mode = "template";
+  let warning = "";
+
+  if (openaiApiKey && activeProvider === "openrouter" && imageDataUrl) {
+    try {
+      const data = await callOpenRouterJson("/chat/completions", {
+        model: openaiImageModel,
+        messages: [
+          {
+            role: "user",
+            content: buildOpenRouterMessageContent(
+              buildEditableDesignReconstructionPrompt({ prompt, width, height }),
+              [
+                {
+                  dataUrl: imageDataUrl,
+                  name: payload.sourceImageName || "selected-design.png"
+                }
+              ]
+            )
+          }
+        ],
+        stream: false
+      });
+      html = sanitizeGeneratedHtml(extractChatCompletionText(data));
+      mode = "model-html";
+    } catch (error) {
+      warning = `HTML 还原模型调用失败，已使用实验模板：${error.message || String(error)}`;
+    }
+  }
+
+  return {
+    ok: true,
+    mode,
+    warning,
+    html,
+    manifest: buildEditableDesignManifest({
+      prompt,
+      width,
+      height,
+      html,
+      sourceImage
+    }),
+    provider: {
+      activeProvider,
+      baseUrl: openaiBaseUrl,
+      model: openaiImageModel
+    }
+  };
+}
+
+function buildEditableDesignManifest({ prompt, width, height, sourceImage }) {
+  const isTall = height >= width;
+  const margin = Math.round(width * 0.07);
+  const cardWidth = width - margin * 2;
+  const headerTop = Math.round(height * 0.055);
+  const titleText = deriveEditableDesignTitle(prompt);
+  const accent = pickPromptAccent(prompt);
+  const heroHeight = Math.round(height * (isTall ? 0.2 : 0.28));
+  const cardY = headerTop + Math.round(height * 0.1);
+  const metricY = cardY + heroHeight + Math.round(height * 0.03);
+  const bottomHeight = Math.max(64, Math.round(height * 0.09));
+
+  return {
+    version: "editable-design-experiment-0.1",
+    screen: {
+      name: "editable_design_experiment",
+      width,
+      height,
+      fill: "#F6F8FB",
+      clipsContent: true
+    },
+    sourceImage,
+    nodes: [
+      {
+        type: "text",
+        name: "screen_title",
+        text: titleText,
+        x: margin,
+        y: headerTop,
+        width: Math.round(width * 0.48),
+        height: 44,
+        fontSize: Math.max(24, Math.round(width * 0.08)),
+        fontWeight: 700,
+        lineHeight: Math.max(30, Math.round(width * 0.1)),
+        color: "#171A22"
+      },
+      {
+        type: "rect",
+        name: "notification_button",
+        x: width - margin - 44,
+        y: headerTop + 2,
+        width: 44,
+        height: 44,
+        radius: 22,
+        fill: "#FFFFFF",
+        shadow: { y: 8, blur: 22, opacity: 0.1 }
+      },
+      {
+        type: "frame",
+        name: "hero_card",
+        x: margin,
+        y: cardY,
+        width: cardWidth,
+        height: heroHeight,
+        radius: Math.max(22, Math.round(width * 0.06)),
+        fill: "#FFFFFF",
+        shadow: { y: 18, blur: 36, opacity: 0.1 },
+        children: [
+          {
+            type: "rect",
+            name: "hero_gradient",
+            x: 0,
+            y: 0,
+            width: cardWidth,
+            height: heroHeight,
+            radius: Math.max(22, Math.round(width * 0.06)),
+            fill: accent.soft
+          },
+          {
+            type: "text",
+            name: "hero_title",
+            text: titleText,
+            x: Math.round(cardWidth * 0.07),
+            y: Math.round(heroHeight * 0.22),
+            width: Math.round(cardWidth * 0.62),
+            height: 40,
+            fontSize: Math.max(22, Math.round(width * 0.065)),
+            fontWeight: 700,
+            lineHeight: Math.max(28, Math.round(width * 0.08)),
+            color: "#161922"
+          },
+          {
+            type: "text",
+            name: "hero_subtitle",
+            text: "智能生成 · 可编辑设计稿",
+            x: Math.round(cardWidth * 0.07),
+            y: Math.round(heroHeight * 0.48),
+            width: Math.round(cardWidth * 0.7),
+            height: 28,
+            fontSize: Math.max(13, Math.round(width * 0.038)),
+            fontWeight: 500,
+            lineHeight: Math.max(18, Math.round(width * 0.05)),
+            color: "#6D7280"
+          },
+          {
+            type: "rect",
+            name: "hero_action",
+            x: Math.round(cardWidth * 0.07),
+            y: Math.round(heroHeight * 0.68),
+            width: Math.round(cardWidth * 0.28),
+            height: 34,
+            radius: 17,
+            fill: accent.main
+          },
+          {
+            type: "text",
+            name: "hero_action_label",
+            text: "开始体验",
+            x: Math.round(cardWidth * 0.095),
+            y: Math.round(heroHeight * 0.705),
+            width: Math.round(cardWidth * 0.22),
+            height: 20,
+            fontSize: Math.max(12, Math.round(width * 0.034)),
+            fontWeight: 600,
+            lineHeight: 18,
+            color: "#FFFFFF"
+          }
+        ]
+      },
+      ...buildMetricCardNodes({ margin, width, cardWidth, metricY, accent }),
+      {
+        type: "frame",
+        name: "bottom_navigation",
+        x: margin,
+        y: height - bottomHeight - Math.round(height * 0.025),
+        width: cardWidth,
+        height: bottomHeight,
+        radius: Math.round(bottomHeight * 0.36),
+        fill: "#FFFFFF",
+        shadow: { y: 14, blur: 28, opacity: 0.08 },
+        children: buildBottomNavNodes({ cardWidth, bottomHeight, accent })
+      }
+    ]
+  };
+}
+
+function buildMetricCardNodes({ margin, width, cardWidth, metricY, accent }) {
+  const gap = Math.max(10, Math.round(width * 0.025));
+  const itemWidth = Math.round((cardWidth - gap * 2) / 3);
+  return ["数据", "任务", "消息"].map((label, index) => ({
+    type: "frame",
+    name: `metric_card_${index + 1}`,
+    x: margin + index * (itemWidth + gap),
+    y: metricY,
+    width: itemWidth,
+    height: Math.round(width * 0.28),
+    radius: 18,
+    fill: "#FFFFFF",
+    shadow: { y: 10, blur: 24, opacity: 0.07 },
+    children: [
+      {
+        type: "rect",
+        name: "metric_icon",
+        x: 16,
+        y: 16,
+        width: 32,
+        height: 32,
+        radius: 12,
+        fill: index === 0 ? accent.main : "#EEF1F6"
+      },
+      {
+        type: "text",
+        name: "metric_label",
+        text: label,
+        x: 16,
+        y: 58,
+        width: itemWidth - 32,
+        height: 18,
+        fontSize: 13,
+        fontWeight: 600,
+        lineHeight: 18,
+        color: "#6D7280"
+      },
+      {
+        type: "text",
+        name: "metric_value",
+        text: index === 0 ? "128" : index === 1 ? "24" : "8",
+        x: 16,
+        y: 80,
+        width: itemWidth - 32,
+        height: 26,
+        fontSize: 22,
+        fontWeight: 700,
+        lineHeight: 26,
+        color: "#151821"
+      }
+    ]
+  }));
+}
+
+function buildBottomNavNodes({ cardWidth, bottomHeight, accent }) {
+  return ["首页", "发现", "记录", "我的"].map((label, index) => {
+    const itemWidth = Math.round(cardWidth / 4);
+    return {
+      type: "text",
+      name: `nav_${index + 1}`,
+      text: label,
+      x: index * itemWidth,
+      y: Math.round(bottomHeight * 0.38),
+      width: itemWidth,
+      height: 22,
+      fontSize: 12,
+      fontWeight: index === 0 ? 700 : 500,
+      lineHeight: 18,
+      color: index === 0 ? accent.main : "#7B8190"
+    };
+  });
+}
+
+function deriveEditableDesignTitle(prompt) {
+  const cleaned = String(prompt || "")
+    .replace(/[，。,.!！?？]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) {
+    return "智能首页";
+  }
+  return cleaned.slice(0, 8);
+}
+
+function pickPromptAccent(prompt) {
+  const text = String(prompt || "");
+  if (/电商|购物|商城|红包|促销/.test(text)) {
+    return { main: "#FF5A3D", soft: "#FFF1EA" };
+  }
+  if (/健康|健身|运动|医疗|养生/.test(text)) {
+    return { main: "#35BF78", soft: "#EAF8F1" };
+  }
+  if (/游戏|勇者|冒险|竞技/.test(text)) {
+    return { main: "#3478F6", soft: "#EAF2FF" };
+  }
+  if (/音乐|会员|vip|娱乐/.test(text)) {
+    return { main: "#7B5CFF", soft: "#F0EDFF" };
+  }
+  return { main: "#111318", soft: "#EEF1F6" };
+}
+
+function buildFallbackEditableDesignHtml({ prompt, width, height }) {
+  const title = deriveEditableDesignTitle(prompt);
+  const accent = pickPromptAccent(prompt);
+  return [
+    "<!doctype html>",
+    "<html>",
+    "<head>",
+    "<meta charset=\"utf-8\" />",
+    `<meta name=\"viewport\" content=\"width=${width}, initial-scale=1\" />`,
+    "<style>",
+    ":root{--bg:#F6F8FB;--text:#171A22;--muted:#6D7280;--card:#FFFFFF;--accent:" + accent.main + ";--soft:" + accent.soft + ";}",
+    "*{box-sizing:border-box}body{margin:0;width:" + width + "px;height:" + height + "px;background:var(--bg);font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--text);}",
+    ".screen{position:relative;width:100%;height:100%;padding:7%;overflow:hidden}.title{font-size:32px;font-weight:800;line-height:1.1}.hero{margin-top:44px;border-radius:28px;background:var(--soft);padding:28px;box-shadow:0 18px 36px rgba(20,24,36,.10)}.hero h2{margin:0 0 10px;font-size:26px}.hero p{margin:0;color:var(--muted)}.button{display:inline-flex;margin-top:18px;padding:10px 18px;border-radius:999px;background:var(--accent);color:white;font-weight:700}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}.metric{border-radius:18px;background:var(--card);padding:16px;box-shadow:0 10px 24px rgba(20,24,36,.07)}.nav{position:absolute;left:7%;right:7%;bottom:3%;height:72px;border-radius:28px;background:#fff;display:grid;grid-template-columns:repeat(4,1fr);place-items:center;box-shadow:0 14px 28px rgba(20,24,36,.08)}",
+    "</style>",
+    "</head>",
+    "<body>",
+    "<main class=\"screen\">",
+    `<div class=\"title\">${escapeHtml(title)}</div>`,
+    "<section class=\"hero\">",
+    `<h2>${escapeHtml(title)}</h2>`,
+    "<p>智能生成 · 可编辑设计稿</p>",
+    "<span class=\"button\">开始体验</span>",
+    "</section>",
+    "<section class=\"metrics\"><div class=\"metric\">数据<br><strong>128</strong></div><div class=\"metric\">任务<br><strong>24</strong></div><div class=\"metric\">消息<br><strong>8</strong></div></section>",
+    "<nav class=\"nav\"><b>首页</b><span>发现</span><span>记录</span><span>我的</span></nav>",
+    "</main>",
+    "</body>",
+    "</html>"
+  ].join("");
+}
+
+function buildEditableDesignReconstructionPrompt({ prompt, width, height }) {
+  return [
+    "你是资深 UI 设计还原工程师、前端工程师和设计系统专家。",
+    "请基于输入的 UI 截图，还原一个高精度、结构清晰、可交互的静态 HTML/CSS 页面。",
+    "输入截图是唯一真实参考，目标是尽量还原截图中的界面样式、组件层级、布局比例、颜色、圆角、阴影、间距、图标风格和交互状态，而不是重新设计一个新页面。",
+    "",
+    `用户原始提示词：${prompt}`,
+    `页面尺寸：${width} x ${height}`,
+    "",
+    "核心要求：",
+    "- 最大深度理解截图中的界面样式和组件结构。",
+    "- 高精度还原每个组件的视觉效果。",
+    "- 所有可交互组件都要保留交互性，包括 default、hover、active、disabled 状态。",
+    "- 文本必须使用真实文本节点，不要把文字作为图片。",
+    "- 按钮、输入框、卡片、标签、导航项、列表项要用 HTML/CSS 还原。",
+    "- 通用功能图标默认使用 Hugeicons 风格作为参考，并用 inline SVG 或 CSS 表达。",
+    "- 吉祥物、角色、复杂插画、照片和商品图不要用 HTML/CSS 硬画，用 image asset placeholder 表达。",
+    "- 不要生成无法编辑的一整张大图。",
+    "- 不要加载远程 JS，不要依赖外部网络资源。",
+    "- 使用 CSS variables 提取主要颜色、圆角、阴影和字号。",
+    "",
+    "最终输出：只返回完整 HTML，不要返回 Markdown，不要解释。"
+  ].join("\n");
+}
+
+function sanitizeGeneratedHtml(text) {
+  const withoutFence = String(text || "")
+    .replace(/^```(?:html)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const match = withoutFence.match(/<!doctype html>[\s\S]*<\/html>|<html[\s\S]*<\/html>/i);
+  if (!match) {
+    throw badRequest("模型没有返回有效 HTML");
+  }
+  return match[0]
+    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "");
+}
+
 async function fetchRemoteImageAsDataUrl(url) {
   const response = await fetch(url);
   if (!response.ok) {
@@ -1119,6 +1497,19 @@ function badRequest(message) {
   const error = new Error(message);
   error.statusCode = 400;
   return error;
+}
+
+function escapeHtml(value) {
+  return String(value || "").replace(/[&<>"']/g, (character) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#39;"
+    };
+    return entities[character] || character;
+  });
 }
 
 function svgValidationError(message) {
