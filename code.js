@@ -273,10 +273,10 @@ function createEditableRectangle(definition) {
 
 async function createEditableImage(definition) {
   if (!definition.dataUrl) {
-    return createEditableRectangle({
-      ...definition,
+    const fallbackDefinition = Object.assign({}, definition, {
       fill: definition.fill || "#EEF1F6"
     });
+    return createEditableRectangle(fallbackDefinition);
   }
   const image = await createImageRectangle({
     name: definition.name || "image_asset",
@@ -339,9 +339,10 @@ function applyBaseNodeProperties(node, definition) {
 }
 
 function createDropShadow(shadow) {
+  const shadowOpacity = shadow.opacity === undefined || shadow.opacity === null ? 0.12 : shadow.opacity;
   return {
     type: "DROP_SHADOW",
-    color: hexToRgbColor(shadow.color || "#000000", shadow.opacity ?? 0.12),
+    color: hexToRgbColor(shadow.color || "#000000", shadowOpacity),
     offset: {
       x: Number.isFinite(Number(shadow.x)) ? Number(shadow.x) : 0,
       y: Number.isFinite(Number(shadow.y)) ? Number(shadow.y) : 10
