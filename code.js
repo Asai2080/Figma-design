@@ -309,7 +309,7 @@ async function createEditableText(definition) {
 async function loadInterFont(style) {
   try {
     await figma.loadFontAsync({ family: "Inter", style });
-  } catch {
+  } catch (error) {
     await figma.loadFontAsync({ family: "Inter", style: "Regular" });
   }
 }
