@@ -939,7 +939,8 @@ async function reconstructEditableDesign(payload) {
       width,
       height,
       html,
-      sourceImage
+      sourceImage,
+      mode
     }),
     provider: {
       activeProvider,
@@ -949,12 +950,12 @@ async function reconstructEditableDesign(payload) {
   };
 }
 
-function buildEditableDesignManifest({ prompt, width, height, sourceImage }) {
+function buildEditableDesignManifest({ prompt, width, height, sourceImage, mode }) {
   const isTall = height >= width;
   const margin = Math.round(width * 0.07);
   const cardWidth = width - margin * 2;
   const headerTop = Math.round(height * 0.055);
-  const titleText = deriveEditableDesignTitle(prompt);
+  const copy = createEditableTemplateCopy(mode);
   const accent = pickPromptAccent(prompt);
   const heroHeight = Math.round(height * (isTall ? 0.2 : 0.28));
   const cardY = headerTop + Math.round(height * 0.1);
@@ -975,7 +976,7 @@ function buildEditableDesignManifest({ prompt, width, height, sourceImage }) {
       {
         type: "text",
         name: "screen_title",
-        text: titleText,
+        text: copy.screenTitle,
         x: margin,
         y: headerTop,
         width: Math.round(width * 0.48),
@@ -1020,7 +1021,7 @@ function buildEditableDesignManifest({ prompt, width, height, sourceImage }) {
           {
             type: "text",
             name: "hero_title",
-            text: titleText,
+            text: copy.heroTitle,
             x: Math.round(cardWidth * 0.07),
             y: Math.round(heroHeight * 0.22),
             width: Math.round(cardWidth * 0.62),
@@ -1033,7 +1034,7 @@ function buildEditableDesignManifest({ prompt, width, height, sourceImage }) {
           {
             type: "text",
             name: "hero_subtitle",
-            text: "智能生成 · 可编辑设计稿",
+            text: copy.heroSubtitle,
             x: Math.round(cardWidth * 0.07),
             y: Math.round(heroHeight * 0.48),
             width: Math.round(cardWidth * 0.7),
@@ -1056,7 +1057,7 @@ function buildEditableDesignManifest({ prompt, width, height, sourceImage }) {
           {
             type: "text",
             name: "hero_action_label",
-            text: "开始体验",
+            text: copy.actionLabel,
             x: Math.round(cardWidth * 0.095),
             y: Math.round(heroHeight * 0.705),
             width: Math.round(cardWidth * 0.22),
@@ -1082,6 +1083,23 @@ function buildEditableDesignManifest({ prompt, width, height, sourceImage }) {
         children: buildBottomNavNodes({ cardWidth, bottomHeight, accent })
       }
     ]
+  };
+}
+
+function createEditableTemplateCopy(mode) {
+  if (mode === "model-html") {
+    return {
+      screenTitle: "AI 还原稿",
+      heroTitle: "可编辑界面",
+      heroSubtitle: "模型已返回 HTML，当前以基础图层承载",
+      actionLabel: "查看结构"
+    };
+  }
+  return {
+    screenTitle: "可编辑稿占位",
+    heroTitle: "等待 AI 还原",
+    heroSubtitle: "当前为实验模板，不代表原图文字",
+    actionLabel: "实验模式"
   };
 }
 
@@ -1187,7 +1205,6 @@ function pickPromptAccent(prompt) {
 }
 
 function buildFallbackEditableDesignHtml({ prompt, width, height }) {
-  const title = deriveEditableDesignTitle(prompt);
   const accent = pickPromptAccent(prompt);
   return [
     "<!doctype html>",
@@ -1203,11 +1220,11 @@ function buildFallbackEditableDesignHtml({ prompt, width, height }) {
     "</head>",
     "<body>",
     "<main class=\"screen\">",
-    `<div class=\"title\">${escapeHtml(title)}</div>`,
+    "<div class=\"title\">可编辑稿占位</div>",
     "<section class=\"hero\">",
-    `<h2>${escapeHtml(title)}</h2>`,
-    "<p>智能生成 · 可编辑设计稿</p>",
-    "<span class=\"button\">开始体验</span>",
+    "<h2>等待 AI 还原</h2>",
+    "<p>当前为实验模板，不代表原图文字</p>",
+    "<span class=\"button\">实验模式</span>",
     "</section>",
     "<section class=\"metrics\"><div class=\"metric\">数据<br><strong>128</strong></div><div class=\"metric\">任务<br><strong>24</strong></div><div class=\"metric\">消息<br><strong>8</strong></div></section>",
     "<nav class=\"nav\"><b>首页</b><span>发现</span><span>记录</span><span>我的</span></nav>",
