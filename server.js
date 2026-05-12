@@ -901,6 +901,7 @@ async function reconstructEditableDesign(payload) {
   let html = buildFallbackEditableDesignHtml({ prompt, width, height });
   let mode = "template";
   let warning = "";
+  let manifest = null;
 
   if (openaiApiKey && activeProvider === "openrouter" && imageDataUrl) {
     try {
@@ -910,7 +911,7 @@ async function reconstructEditableDesign(payload) {
           {
             role: "user",
             content: buildOpenRouterMessageContent(
-              buildEditableDesignReconstructionPrompt({ prompt, width, height }),
+              buildEditableDesignManifestPrompt({ prompt, width, height }),
               [
                 {
                   dataUrl: imageDataUrl,
@@ -920,28 +921,42 @@ async function reconstructEditableDesign(payload) {
             )
           }
         ],
+        response_format: { type: "json_object" },
         stream: false
       });
-      html = sanitizeGeneratedHtml(extractChatCompletionText(data));
-      mode = "model-html";
+      manifest = sanitizeEditableDesignManifest(
+        extractEditableDesignManifestJson(extractChatCompletionText(data)),
+        { width, height, sourceImage }
+      );
+      html = buildHtmlPreviewFromEditableManifest(manifest);
+      mode = "model-manifest";
     } catch (error) {
-      warning = `HTML 还原模型调用失败，已使用实验模板：${error.message || String(error)}`;
+      warning = `AI 还原失败，已使用实验模板：${error.message || String(error)}`;
     }
   }
 
-  return {
-    ok: true,
-    mode,
-    warning,
-    html,
-    manifest: buildEditableDesignManifest({
+  if (!manifest) {
+    manifest = buildEditableDesignManifest({
       prompt,
       width,
       height,
       html,
       sourceImage,
       mode
-    }),
+    });
+  }
+  manifest.metadata = Object.assign({}, manifest.metadata || {}, {
+    mode,
+    provider: activeProvider,
+    model: openaiImageModel
+  });
+
+  return {
+    ok: true,
+    mode,
+    warning,
+    html,
+    manifest,
     provider: {
       activeProvider,
       baseUrl: openaiBaseUrl,
@@ -964,8 +979,12 @@ function buildEditableDesignManifest({ prompt, width, height, sourceImage, mode 
 
   return {
     version: "editable-design-experiment-0.1",
+    metadata: {
+      mode,
+      note: mode === "template" ? "template placeholder, not real screenshot reconstruction" : "model generated editable manifest"
+    },
     screen: {
-      name: "editable_design_experiment",
+      name: mode === "template" ? "editable_design_template_placeholder" : "editable_design_ai_reconstruction",
       width,
       height,
       fill: "#F6F8FB",
@@ -1087,11 +1106,11 @@ function buildEditableDesignManifest({ prompt, width, height, sourceImage, mode 
 }
 
 function createEditableTemplateCopy(mode) {
-  if (mode === "model-html") {
+  if (mode === "model-manifest") {
     return {
       screenTitle: "AI 还原稿",
       heroTitle: "可编辑界面",
-      heroSubtitle: "模型已返回 HTML，当前以基础图层承载",
+      heroSubtitle: "模型已返回结构化节点",
       actionLabel: "查看结构"
     };
   }
@@ -1101,6 +1120,195 @@ function createEditableTemplateCopy(mode) {
     heroSubtitle: "当前为实验模板，不代表原图文字",
     actionLabel: "实验模式"
   };
+}
+
+function buildEditableDesignManifestPrompt({ prompt, width, height }) {
+  return [
+    "你是资深 UI 截图结构化还原工程师和 Figma 插件节点生成专家。",
+    "请基于输入的 UI 截图生成一个可编辑 Figma manifest JSON。输入截图是唯一真实参考，用户原始提示词只能帮助理解页面主题，绝对不能被当成界面文案写入 manifest。",
+    "",
+    "强约束：",
+    "- 只输出 JSON 对象，不要 Markdown，不要解释。",
+    "- 不要输出 HTML。",
+    "- 不要把用户提示词复制成页面标题、按钮、卡片文案或任何界面文字。",
+    "- 文本节点只能来自截图中清晰可见的真实文字；看不清时用短占位：文本。",
+    "- 坐标、尺寸必须在截图画布内，画布尺寸为 " + width + " x " + height + "。",
+    "- 优先还原主要布局、文字层级、卡片、按钮、底部导航、状态栏、搜索框、banner、列表和主要装饰块。",
+    "- 复杂角色、商品图、插画、照片不要硬画，使用 image 类型占位或简化矩形占位。",
+    "- 控制节点数量在 12 到 60 个之间，避免生成大量碎片。",
+    "- 所有颜色使用 #RRGGBB。",
+    "- 圆角、阴影、透明度要尽量接近截图。",
+    "",
+    "允许的节点类型：",
+    "- frame: 可包含 children，用于卡片、导航、分组。",
+    "- rect: 矩形、背景、按钮、图标占位。",
+    "- text: 真实文本。",
+    "- image: 复杂图片占位，不需要 dataUrl。",
+    "",
+    "返回 JSON schema：",
+    "{",
+    "  \"version\": \"editable-design-experiment-0.2\",",
+    "  \"metadata\": { \"mode\": \"model-manifest\", \"confidence\": 0.0-1.0 },",
+    "  \"screen\": { \"name\": \"editable_design_ai_reconstruction\", \"width\": " + width + ", \"height\": " + height + ", \"fill\": \"#FFFFFF\", \"clipsContent\": true },",
+    "  \"nodes\": [",
+    "    { \"type\":\"text\", \"name\":\"title\", \"text\":\"截图中的真实文字\", \"x\":0, \"y\":0, \"width\":100, \"height\":30, \"fontSize\":20, \"fontWeight\":700, \"lineHeight\":26, \"color\":\"#111111\" },",
+    "    { \"type\":\"frame\", \"name\":\"card\", \"x\":0, \"y\":0, \"width\":100, \"height\":100, \"radius\":16, \"fill\":\"#FFFFFF\", \"shadow\":{\"y\":8,\"blur\":24,\"opacity\":0.12}, \"children\":[] }",
+    "  ]",
+    "}",
+    "",
+    "用户原始提示词，仅用于理解主题，不得复制到界面文案：",
+    prompt || ""
+  ].join("\n");
+}
+
+function extractEditableDesignManifestJson(text) {
+  const raw = String(text || "").trim();
+  const withoutFence = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+  const start = withoutFence.indexOf("{");
+  const end = withoutFence.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    throw new Error("模型没有返回 manifest JSON");
+  }
+  try {
+    return JSON.parse(withoutFence.slice(start, end + 1));
+  } catch (error) {
+    throw new Error(`manifest JSON 解析失败：${error.message || String(error)}`);
+  }
+}
+
+function sanitizeEditableDesignManifest(manifest, { width, height, sourceImage }) {
+  if (!manifest || typeof manifest !== "object" || !Array.isArray(manifest.nodes)) {
+    throw new Error("manifest 缺少 nodes 数组");
+  }
+  const screen = manifest.screen && typeof manifest.screen === "object" ? manifest.screen : {};
+  const sanitized = {
+    version: "editable-design-experiment-0.2",
+    metadata: Object.assign({}, manifest.metadata || {}, { mode: "model-manifest" }),
+    screen: {
+      name: "editable_design_ai_reconstruction",
+      width,
+      height,
+      fill: normalizeHexColor(screen.fill, "#FFFFFF"),
+      clipsContent: screen.clipsContent !== false
+    },
+    sourceImage,
+    nodes: sanitizeEditableNodes(manifest.nodes, { width, height, depth: 0 }).slice(0, 80)
+  };
+  if (!sanitized.nodes.length) {
+    throw new Error("manifest 没有可用节点");
+  }
+  return sanitized;
+}
+
+function sanitizeEditableNodes(nodes, bounds) {
+  if (!Array.isArray(nodes) || bounds.depth > 5) {
+    return [];
+  }
+  const width = bounds.width;
+  const height = bounds.height;
+  return nodes
+    .map((node, index) => sanitizeEditableNode(node, { width, height, depth: bounds.depth, index }))
+    .filter(Boolean);
+}
+
+function sanitizeEditableNode(node, context) {
+  if (!node || typeof node !== "object") {
+    return null;
+  }
+  const allowedTypes = new Set(["frame", "rect", "text", "image"]);
+  const type = allowedTypes.has(String(node.type || "").toLowerCase()) ? String(node.type).toLowerCase() : "rect";
+  const x = clampNumber(node.x || 0, 0, context.width);
+  const y = clampNumber(node.y || 0, 0, context.height);
+  const maxWidth = Math.max(1, context.width - x);
+  const maxHeight = Math.max(1, context.height - y);
+  const sanitized = {
+    type,
+    name: safeNodeName(node.name || `${type}_${context.index + 1}`),
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(clampNumber(node.width || 80, 1, maxWidth)),
+    height: Math.round(clampNumber(node.height || 40, 1, maxHeight))
+  };
+
+  if (type === "text") {
+    sanitized.text = String(node.text || "文本").slice(0, 80);
+    sanitized.fontSize = Math.round(clampNumber(node.fontSize || 16, 8, 96));
+    sanitized.fontWeight = Math.round(clampNumber(node.fontWeight || 500, 300, 900));
+    sanitized.lineHeight = Math.round(clampNumber(node.lineHeight || sanitized.fontSize * 1.25, sanitized.fontSize, 140));
+    sanitized.color = normalizeHexColor(node.color, "#111318");
+    return sanitized;
+  }
+
+  sanitized.fill = normalizeHexColor(node.fill, type === "image" ? "#EEF1F6" : "#FFFFFF");
+  sanitized.radius = Math.round(clampNumber(node.radius || 0, 0, 999));
+  sanitized.opacity = clampNumber(node.opacity === undefined ? 1 : node.opacity, 0, 1);
+  if (node.stroke) {
+    sanitized.stroke = normalizeHexColor(node.stroke, "#E4E7EE");
+    sanitized.strokeWidth = clampNumber(node.strokeWidth || 1, 0, 24);
+  }
+  if (node.shadow && typeof node.shadow === "object") {
+    sanitized.shadow = {
+      color: normalizeHexColor(node.shadow.color, "#000000"),
+      opacity: clampNumber(node.shadow.opacity === undefined ? 0.12 : node.shadow.opacity, 0, 0.5),
+      x: clampNumber(node.shadow.x || 0, -80, 80),
+      y: clampNumber(node.shadow.y || 8, -80, 80),
+      blur: clampNumber(node.shadow.blur || 20, 0, 120),
+      spread: clampNumber(node.shadow.spread || 0, -40, 40)
+    };
+  }
+  if (type === "frame") {
+    sanitized.clipsContent = node.clipsContent === true;
+    sanitized.children = sanitizeEditableNodes(node.children || [], {
+      width: sanitized.width,
+      height: sanitized.height,
+      depth: context.depth + 1
+    });
+  }
+  return sanitized;
+}
+
+function normalizeHexColor(value, fallback) {
+  const text = String(value || "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(text)) {
+    return text;
+  }
+  if (/^#[0-9a-f]{3}$/i.test(text)) {
+    return `#${text[1]}${text[1]}${text[2]}${text[2]}${text[3]}${text[3]}`;
+  }
+  return fallback;
+}
+
+function safeNodeName(value) {
+  return String(value || "node")
+    .replace(/[^\w\u4e00-\u9fa5-]+/g, "_")
+    .slice(0, 64) || "node";
+}
+
+function buildHtmlPreviewFromEditableManifest(manifest) {
+  const nodes = [];
+  const walk = (node) => {
+    if (!node) {
+      return;
+    }
+    if (node.type === "text") {
+      nodes.push(`<div class="node text" style="left:${node.x}px;top:${node.y}px;width:${node.width}px;height:${node.height}px;font-size:${node.fontSize}px;line-height:${node.lineHeight}px;font-weight:${node.fontWeight};color:${node.color};">${escapeHtml(node.text)}</div>`);
+      return;
+    }
+    nodes.push(`<div class="node box" style="left:${node.x}px;top:${node.y}px;width:${node.width}px;height:${node.height}px;border-radius:${node.radius || 0}px;background:${node.fill || "#fff"};"></div>`);
+    (node.children || []).forEach(walk);
+  };
+  (manifest.nodes || []).forEach(walk);
+  return [
+    "<!doctype html><html><head><meta charset=\"utf-8\" />",
+    `<style>body{margin:0;background:${manifest.screen.fill};font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.screen{position:relative;width:${manifest.screen.width}px;height:${manifest.screen.height}px;overflow:hidden}.node{position:absolute;box-sizing:border-box}.text{white-space:pre-wrap}.box{box-shadow:0 8px 24px rgba(20,24,36,.08)}</style>`,
+    "</head><body>",
+    "<main class=\"screen\">",
+    nodes.join(""),
+    "</main></body></html>"
+  ].join("");
 }
 
 function buildMetricCardNodes({ margin, width, cardWidth, metricY, accent }) {

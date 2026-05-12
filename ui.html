@@ -5491,6 +5491,10 @@ if(typeof define === 'function' && define.amd){
         }
         if (result.warning) {
           setStatus(result.warning, true);
+        } else if (result.mode === "model-manifest") {
+          setStatus("已生成 AI 还原可编辑设计稿。");
+        } else if (result.mode === "template") {
+          setStatus("当前为可编辑稿模板占位，还不是图片真实还原。", true);
         }
         return result.manifest;
       }
