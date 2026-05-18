@@ -43,6 +43,7 @@ AI UI Asset Generator 是一个运行在 Figma 内的 AI UI 设计稿生成与�
 更完整的使用流程、功能说明和常见问题见：
 
 - [使用说明与功能说明](docs/使用说明与功能说明.md)
+- [2.0 更新说明](docs/2.0-update.md)
 - [2.0 Roadmap](docs/v2-roadmap.md)
 
 1. 安装依赖：
@@ -70,13 +71,13 @@ npm run api
 后端默认运行在：
 
 ```text
-http://127.0.0.1:8787
+http://127.0.0.1:18787
 ```
 
 健康检查：
 
 ```bash
-curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:18787/health
 ```
 
 4. 启动本地预览：
@@ -114,7 +115,7 @@ http://127.0.0.1:4173/figma-sim.html
 前端会请求本地代理：
 
 ```text
-http://127.0.0.1:8787
+http://127.0.0.1:18787
 ```
 
 如果出现 `Failed to fetch`，通常表示本地 API 代理没有启动，请先运行：
