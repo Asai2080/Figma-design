@@ -2,7 +2,7 @@
 
 版本：草案 1
 
-最后更新：2026-05-12
+最后更新：2026-05-13
 
 本文档用于规划一个临时实验能力：在点击 `放入 Figma` 时，用户可以选择导入 `源文件` 或 `设计稿`。
 
@@ -280,24 +280,53 @@ P0 当前实现说明：
 
 ### P1：提升还原质量
 
-- [ ] 增加 HTML 生成提示词模板。
+- [x] 增加独立 H5 预览链路：`POST /api/design/reconstruct-h5`，用于直接验证 `截图 -> HTML` 的还原质量。
+- [x] 接入 ScreenCoder 思路的两段式策略：先把截图当成唯一真实参考做视觉理解，再用绝对定位 HTML 还原 750px 宽移动端画板。
+- [x] 在 H5 预览中增加 `导入此 H5 到 Figma`，把预览 iframe 的 DOM 捕获成可编辑 manifest。
+- [ ] 增加 HTML 生成提示词模板的持续调优版本。
 - [ ] 增加 OCR / 文本识别辅助，减少文字错误。
 - [ ] 拆分复杂图片资源，保留头像、商品图、插画为 image fill。
 - [ ] 增加吉祥物 / IP 资产占位策略：有切图用切图，无切图则调用 image2 生成透明底 mascot asset。
 - [ ] 增加通用图标映射策略：常见功能图标默认按 Hugeicons 风格生成 inline SVG。
 - [ ] 为按钮、输入框、卡片、导航项等交互组件补齐 default / hover / active / disabled 状态。
 - [ ] 捕获并转换基础阴影、圆角、边框、渐变。
-- [ ] 导入前提供 HTML 预览。
+- [x] 导入前提供 HTML 预览。
 - [ ] 导入后自动分组命名：`Header`、`Hero`、`Card`、`TabBar` 等。
+
+P1 当前实现说明：
+
+- `编辑设计稿` 不再复用 manifest 预览，而是调用 `/api/design/reconstruct-h5` 生成可预览 HTML。
+- 该接口只负责“图片到 HTML”的还原质量验证，不直接影响 `源文件` 和 `设计稿（实验）` 的 Figma 导入。
+- 编辑设计稿预览采用原图宽度 / 移动端宽度策略，按原图比例计算高度；用户切图资产会作为 `asset:<id>` 提供给模型，并在 HTML 安全处理后替换为本地 data URL。
+- 用户切图资产现在是强约束：prompt 要求模型按原始坐标使用，后端也会在模型漏用时把缺失切图按坐标注入到 `.screen`，避免编辑设计稿预览只靠模型重画。
+- 如果模型失败，会回退到本地预览模板，避免整个插件流程中断。
+- `编辑设计稿` 已升级为 web-to-figma vendor 适配桥：复刻 `Paidax01/web-to-figma` 的核心 `capture.js` 到 `vendor/web-to-figma-capture-adapter.js`，本地补丁只暴露 raw capture 方法；导入预览时优先使用这套捕获器抓取 DOM / computed style / image assets / text rect，再映射成 `create-editable-design-screen` 可消费的 manifest。
+- 如果 web-to-figma vendor 捕获失败，会自动回退到原来的最小 DOM capture，保证实验链路失败时不影响 1.0 的源文件导入。
+- 旧版 `设计稿（实验）` 仍保留原 `/api/design/reconstruct-html` manifest 路径但默认隐藏；`编辑设计稿` 使用 H5 DOM 导入链路，不替换源文件导入。
 
 ### P2：接近生产能力
 
-- [ ] 接入或深度适配 `web-to-figma` 捕获格式。
+- [x] 接入最小版 `web-to-figma` 思路：从 H5 预览 DOM 捕获基础节点并映射到 Figma。
+- [ ] 深度适配 `web-to-figma` 捕获字段，补齐渐变、复杂背景、mask、filter、伪元素等高级 CSS。
 - [ ] 增加设计稿相似度对比。
 - [ ] 支持多张生成图逐张还原。
 - [ ] 支持导出 HTML 和 Figma 节点映射 JSON。
 - [ ] 支持把常见 UI 元素识别成组件候选。
 - [ ] 支持设计 token 提取：颜色、字号、圆角、间距。
+
+### P2.1：web-to-figma 接入分阶段
+
+目标：把当前 H5 预览生成出来的 DOM 更稳定地转成 Figma 可编辑节点。
+
+分阶段策略：
+
+1. [x] 研究并抽取 `Paidax01/web-to-figma` 的 DOM 捕获思想，而不是直接把整个 Chrome Extension 塞进 Figma 插件。
+2. [x] 在 H5 预览 iframe 内实现最小 DOM capture：读取元素的 `getBoundingClientRect()` 和 `getComputedStyle()`，产出中间 JSON。
+3. [x] 把中间 JSON 映射为现有 `create-editable-design-screen` 能消费的 manifest。
+4. [x] 复刻 upstream `capture.js` 并改成本地 vendor runtime：`vendor/web-to-figma-capture-adapter.js`。
+5. [x] 在 H5 预览 iframe 中注入 vendor runtime，优先使用 `web-to-figma` 原始 DOM 序列化结果，再映射为现有 manifest。
+6. [ ] 继续补齐 vendor JSON 到 Figma manifest 的高级字段：多背景、复杂渐变、mask、filter、伪元素、背景图裁切方式。
+7. 保留源文件导入作为稳定回退；web-to-figma 链路只服务 `设计稿（实验）`。
 
 ## 6. 风险和边界
 

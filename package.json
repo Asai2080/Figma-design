@@ -1,6 +1,6 @@
 {
   "name": "ai-ui-asset-generator",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "api": "node server.js",

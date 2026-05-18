@@ -39,6 +39,11 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type,authorization"
 };
 const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 300000);
+const OPENROUTER_ANALYSIS_MAX_TOKENS = Number(process.env.OPENROUTER_ANALYSIS_MAX_TOKENS || 8000);
+const OPENROUTER_H5_MAX_TOKENS = Number(process.env.OPENROUTER_H5_MAX_TOKENS || 12000);
+const OPENROUTER_MANIFEST_MAX_TOKENS = Number(process.env.OPENROUTER_MANIFEST_MAX_TOKENS || 8192);
+const OPENROUTER_SVG_MAX_TOKENS = Number(process.env.OPENROUTER_SVG_MAX_TOKENS || 4096);
+const OPENROUTER_IMAGE_TEXT_MAX_TOKENS = Number(process.env.OPENROUTER_IMAGE_TEXT_MAX_TOKENS || 1024);
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -178,6 +183,32 @@ const server = http.createServer(async (request, response) => {
       const payload = await readJson(request);
       const result = await reconstructEditableDesign(payload);
       sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/design/reconstruct-h5") {
+      const payload = await readJson(request);
+      const result = await reconstructEditableDesignH5(payload);
+      sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/design/analyze-ui") {
+      requireApiKey();
+      const payload = await readJson(request);
+      const width = clampNumber(payload.width || 390, 256, 4096);
+      const height = clampNumber(payload.height || 844, 256, 4096);
+      const referenceAssets = normalizeEditableReferenceAssets(payload.referenceAssets, width, height);
+      const modelReferenceAssets = selectEditableModelReferenceAssets(referenceAssets);
+      const result = await analyzeEditableDesignImage({
+        prompt: assertString(payload.prompt || "", "prompt"),
+        width,
+        height,
+        imageDataUrl: typeof payload.imageDataUrl === "string" ? payload.imageDataUrl : "",
+        referenceAssets,
+        modelReferenceAssets
+      });
+      sendJson(response, 200, { ok: true, analysis: result });
       return;
     }
 
@@ -520,7 +551,8 @@ async function requestSvgChatCompletion({ prompt, dataUrl, name }) {
       }
     ],
     stream: false,
-    temperature: 0.08
+    temperature: 0.08,
+    ...(activeProvider === "openrouter" ? { max_tokens: OPENROUTER_SVG_MAX_TOKENS } : {})
   };
   return activeProvider === "openrouter"
     ? callOpenRouterJson("/chat/completions", body)
@@ -657,6 +689,7 @@ async function generateOpenRouterImages({ prompt, count, width, height, images =
       ],
       modalities: ["image", "text"],
       stream: false,
+      max_tokens: OPENROUTER_IMAGE_TEXT_MAX_TOKENS,
       image_config: {
         aspect_ratio: aspectRatio,
         image_size: "1K"
@@ -763,7 +796,7 @@ function extractChatCompletionText(data) {
       }
     }
   }
-  throw new Error("模型没有返回 SVG 文本");
+  throw new Error("模型没有返回文本内容");
 }
 
 function sanitizeGeneratedSvg(text) {
@@ -897,41 +930,69 @@ async function reconstructEditableDesign(payload) {
         name: payload.sourceImageName || "source_ui_reference.png"
       }
     : null;
+  const referenceAssets = normalizeEditableReferenceAssets(payload.referenceAssets, width, height);
+  const modelReferenceAssets = selectEditableModelReferenceAssets(referenceAssets);
 
   let html = buildFallbackEditableDesignHtml({ prompt, width, height });
   let mode = "template";
   let warning = "";
+  let visualAnalysis = null;
   let manifest = null;
 
   if (openaiApiKey && activeProvider === "openrouter" && imageDataUrl) {
     try {
+      try {
+        visualAnalysis = await analyzeEditableDesignImage({
+          prompt,
+          width,
+          height,
+          imageDataUrl,
+          referenceAssets,
+          modelReferenceAssets
+        });
+      } catch (analysisError) {
+        warning = `AI 视觉分析失败，已跳过分析层：${formatEditableDesignError(analysisError)}`;
+      }
       const data = await callOpenRouterJson("/chat/completions", {
         model: openaiImageModel,
         messages: [
           {
             role: "user",
             content: buildOpenRouterMessageContent(
-              buildEditableDesignManifestPrompt({ prompt, width, height }),
+              buildEditableDesignManifestPrompt({
+                prompt,
+                width,
+                height,
+                referenceAssets,
+                modelReferenceAssets,
+                visualAnalysis
+              }),
               [
                 {
                   dataUrl: imageDataUrl,
                   name: payload.sourceImageName || "selected-design.png"
-                }
+                },
+                ...modelReferenceAssets.map((asset, index) => ({
+                  dataUrl: asset.dataUrl,
+                  name: `slice-reference-${index + 1}-${asset.name || asset.id || "asset"}.png`
+                }))
               ]
             )
           }
         ],
         response_format: { type: "json_object" },
-        stream: false
+        stream: false,
+        max_tokens: OPENROUTER_MANIFEST_MAX_TOKENS
       });
       manifest = sanitizeEditableDesignManifest(
         extractEditableDesignManifestJson(extractChatCompletionText(data)),
-        { width, height, sourceImage }
+        { width, height, sourceImage, referenceAssets }
       );
       html = buildHtmlPreviewFromEditableManifest(manifest);
       mode = "model-manifest";
     } catch (error) {
-      warning = `AI 还原失败，已使用实验模板：${error.message || String(error)}`;
+      const prefix = warning ? `${warning}；` : "";
+      warning = `${prefix}AI 还原失败，已使用实验模板：${formatEditableDesignError(error)}`;
     }
   }
 
@@ -942,13 +1003,17 @@ async function reconstructEditableDesign(payload) {
       height,
       html,
       sourceImage,
-      mode
+      mode,
+      referenceAssets
     });
   }
   manifest.metadata = Object.assign({}, manifest.metadata || {}, {
     mode,
     provider: activeProvider,
-    model: openaiImageModel
+    model: openaiImageModel,
+    referenceAssetCount: referenceAssets.length,
+    modelReferenceAssetCount: modelReferenceAssets.length,
+    analysisMode: visualAnalysis ? "two-stage" : "direct"
   });
 
   return {
@@ -957,6 +1022,7 @@ async function reconstructEditableDesign(payload) {
     warning,
     html,
     manifest,
+    analysis: visualAnalysis,
     provider: {
       activeProvider,
       baseUrl: openaiBaseUrl,
@@ -965,7 +1031,334 @@ async function reconstructEditableDesign(payload) {
   };
 }
 
-function buildEditableDesignManifest({ prompt, width, height, sourceImage, mode }) {
+async function reconstructEditableDesignH5(payload) {
+  const prompt = assertString(payload.prompt || "", "prompt");
+  const width = clampNumber(payload.width || 390, 256, 4096);
+  const height = clampNumber(payload.height || 844, 256, 4096);
+  const imageDataUrl = typeof payload.imageDataUrl === "string" ? payload.imageDataUrl : "";
+  const referenceAssets = normalizeEditableReferenceAssets(payload.referenceAssets, width, height);
+  const modelReferenceAssets = selectEditableModelReferenceAssets(referenceAssets);
+  const previewWidth = Math.round(width);
+  const previewHeight = Math.max(1, Math.round(height * (previewWidth / width)));
+  const fallbackHtml = buildFallbackH5PreviewHtml({
+    prompt,
+    width,
+    height,
+    previewWidth,
+    previewHeight,
+    imageDataUrl,
+    referenceAssets
+  });
+
+  if (!openaiApiKey || activeProvider !== "openrouter" || !imageDataUrl) {
+    return {
+      ok: true,
+      mode: "h5-template",
+      warning: "当前没有可用 OpenRouter 图片理解配置，已打开本地 H5 预览模板。",
+      html: fallbackHtml,
+      metadata: {
+        width,
+        height,
+        previewWidth,
+        previewHeight,
+        referenceAssetCount: referenceAssets.length,
+        modelReferenceAssetCount: modelReferenceAssets.length
+      },
+      provider: {
+        activeProvider,
+        baseUrl: openaiBaseUrl,
+        model: openaiImageModel
+      }
+    };
+  }
+
+  try {
+    let visualAnalysis = null;
+    try {
+      visualAnalysis = await analyzeEditableDesignImage({
+        prompt,
+        width,
+        height,
+        imageDataUrl,
+        referenceAssets,
+        modelReferenceAssets
+      });
+    } catch (analysisError) {
+      console.warn("[reconstruct-h5] visual analysis failed, continue direct HTML generation:", analysisError?.message || analysisError);
+    }
+    const data = await callOpenRouterJson("/chat/completions", {
+      model: openaiImageModel,
+      messages: [
+        {
+          role: "user",
+          content: buildOpenRouterMessageContent(
+            buildEditableDesignH5Prompt({
+              prompt,
+              width,
+              height,
+              previewWidth,
+              previewHeight,
+              referenceAssets,
+              modelReferenceAssets,
+              visualAnalysis
+            }),
+            [
+              {
+                dataUrl: imageDataUrl,
+                name: payload.sourceImageName || "full-ui-screenshot.png"
+              },
+              ...modelReferenceAssets.map((asset, index) => ({
+                dataUrl: asset.dataUrl,
+                name: `slice-reference-${index + 1}-${asset.name || asset.id || "asset"}.png`
+              }))
+            ]
+          )
+        }
+      ],
+      stream: false,
+      max_tokens: OPENROUTER_H5_MAX_TOKENS
+    });
+    const rawHtml = extractHtmlDocument(extractChatCompletionText(data));
+    const html = sanitizeGeneratedHtml(rawHtml, referenceAssets, {
+      previewWidth,
+      previewHeight,
+      sourceWidth: width,
+      sourceHeight: height
+    });
+    return {
+      ok: true,
+      mode: "h5-direct",
+      warning: "",
+      html,
+      metadata: {
+        width,
+        height,
+        previewWidth,
+        previewHeight,
+        referenceAssetCount: referenceAssets.length,
+        modelReferenceAssetCount: modelReferenceAssets.length,
+        hasVisualAnalysis: Boolean(visualAnalysis)
+      },
+      provider: {
+        activeProvider,
+        baseUrl: openaiBaseUrl,
+        model: openaiImageModel
+      }
+    };
+  } catch (error) {
+    const formattedError = formatEditableDesignError(error);
+    console.warn("[reconstruct-h5] html generation failed:", error?.message || error);
+    const h5Error = new Error(`AI H5 还原失败：${formattedError}`);
+    h5Error.statusCode = error.statusCode || 502;
+    throw h5Error;
+  }
+}
+
+function formatEditableDesignError(error) {
+  const message = error && error.message ? error.message : String(error);
+  if (/terminated|socket|network|fetch failed/i.test(message)) {
+    return "上游连接被中断，通常是请求体过大或模型响应超时。已减少切图附件数量，请重试。";
+  }
+  return message;
+}
+
+async function analyzeEditableDesignImage({ prompt, width, height, imageDataUrl, referenceAssets, modelReferenceAssets }) {
+  if (!openaiApiKey || activeProvider !== "openrouter" || !imageDataUrl) {
+    return null;
+  }
+  const data = await callOpenRouterJson("/chat/completions", {
+    model: openaiImageModel,
+    messages: [
+      {
+        role: "user",
+        content: buildOpenRouterMessageContent(
+          buildEditableDesignAnalysisPrompt({ prompt, width, height, referenceAssets, modelReferenceAssets }),
+          [
+            {
+              dataUrl: imageDataUrl,
+              name: "full-ui-screenshot.png"
+            },
+            ...modelReferenceAssets.map((asset, index) => ({
+              dataUrl: asset.dataUrl,
+              name: `slice-reference-${index + 1}-${asset.name || asset.id || "asset"}.png`
+            }))
+          ]
+        )
+      }
+    ],
+    response_format: { type: "json_object" },
+    stream: false,
+    max_tokens: OPENROUTER_ANALYSIS_MAX_TOKENS
+  });
+  return sanitizeEditableDesignAnalysis(extractEditableDesignManifestJson(extractChatCompletionText(data)));
+}
+
+function sanitizeEditableDesignAnalysis(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  return {
+    version: "ui-visual-analysis-0.1",
+    screen: sanitizeAnalysisObject(value.screen, 2),
+    layout: sanitizeAnalysisObject(value.layout, 3),
+    regions: sanitizeAnalysisList(value.regions, 60),
+    texts: sanitizeAnalysisList(value.texts, 100),
+    controls: sanitizeAnalysisList(value.controls, 100),
+    assets: sanitizeAnalysisList(value.assets, 60),
+    missingButImportant: sanitizeAnalysisList(value.missingButImportant, 24)
+  };
+}
+
+function sanitizeAnalysisObject(value, depth) {
+  const sanitized = sanitizeAnalysisValue(value, depth);
+  return sanitized && typeof sanitized === "object" && !Array.isArray(sanitized) ? sanitized : {};
+}
+
+function sanitizeAnalysisList(value, maxItems) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .slice(0, maxItems)
+    .map((item) => sanitizeAnalysisValue(item, 4))
+    .filter((item) => item !== null && item !== undefined && item !== "");
+}
+
+function sanitizeAnalysisValue(value, depth) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^data:image\//i.test(trimmed)) {
+      return "[image-data-removed]";
+    }
+    return trimmed.slice(0, 700);
+  }
+  if (depth <= 0) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 40)
+      .map((item) => sanitizeAnalysisValue(item, depth - 1))
+      .filter((item) => item !== null && item !== undefined && item !== "");
+  }
+  if (typeof value === "object") {
+    const result = {};
+    for (const [key, item] of Object.entries(value).slice(0, 40)) {
+      if (/dataUrl|base64|image_base64|b64_json/i.test(key)) {
+        continue;
+      }
+      const safeKey = String(key).replace(/[^\w-]/g, "_").slice(0, 48);
+      const safeValue = sanitizeAnalysisValue(item, depth - 1);
+      if (safeKey && safeValue !== null && safeValue !== undefined && safeValue !== "") {
+        result[safeKey] = safeValue;
+      }
+    }
+    return result;
+  }
+  return null;
+}
+
+function stableJsonStringify(value, maxLength) {
+  const seen = new WeakSet();
+  const text = JSON.stringify(value, (key, item) => {
+    if (/dataUrl|base64|image_base64|b64_json/i.test(key)) {
+      return undefined;
+    }
+    if (item && typeof item === "object") {
+      if (seen.has(item)) {
+        return "[circular]";
+      }
+      seen.add(item);
+    }
+    return item;
+  }, 2);
+  if (maxLength && text.length > maxLength) {
+    return `${text.slice(0, maxLength)}\n...truncated`;
+  }
+  return text;
+}
+
+function normalizeEditableReferenceAssets(value, width, height) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((asset, index) => {
+      if (!asset || typeof asset !== "object") {
+        return null;
+      }
+      const dataUrl = typeof asset.dataUrl === "string" ? asset.dataUrl : "";
+      if (!/^data:image\/(?:png|jpeg|jpg|webp|gif);base64,/i.test(dataUrl)) {
+        return null;
+      }
+      const placement = asset.placement && typeof asset.placement === "object" ? asset.placement : {};
+      const x = clampNumber(placement.x || 0, 0, width - 1);
+      const y = clampNumber(placement.y || 0, 0, height - 1);
+      const assetWidth = clampNumber(placement.width || 1, 1, width - x);
+      const assetHeight = clampNumber(placement.height || 1, 1, height - y);
+      const radius = clampNumber(asset.radius || 0, 0, Math.min(assetWidth, assetHeight) / 2);
+      return {
+        id: safeNodeName(asset.id || `slice_${index + 1}`),
+        name: safeNodeName(asset.name || asset.id || `slice_${index + 1}`),
+        kind: safeNodeName(asset.kind || asset.type || "asset"),
+        dataUrl,
+        radius: Math.round(radius),
+        placement: {
+          x: Math.round(x),
+          y: Math.round(y),
+          width: Math.round(assetWidth),
+          height: Math.round(assetHeight)
+        }
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 24);
+}
+
+function selectEditableModelReferenceAssets(referenceAssets) {
+  const MAX_MODEL_ASSET_COUNT = 6;
+  const MAX_MODEL_ASSET_CHARS = 360000;
+  return referenceAssets
+    .filter((asset) => asset && typeof asset.dataUrl === "string" && asset.dataUrl.length <= MAX_MODEL_ASSET_CHARS)
+    .slice(0, MAX_MODEL_ASSET_COUNT);
+}
+
+function buildReferenceAssetImageNodes(referenceAssets) {
+  return referenceAssets.map((asset, index) => {
+    const placement = asset.placement;
+    const minEdge = Math.min(placement.width, placement.height);
+    return {
+      type: "image",
+      name: safeNodeName(`slice_asset_${index + 1}_${asset.name}`),
+      dataUrl: asset.dataUrl,
+      x: placement.x,
+      y: placement.y,
+      width: placement.width,
+      height: placement.height,
+      radius: Math.round(clampNumber(asset.radius || minEdge * 0.18, 0, minEdge / 2)),
+      fill: "#F3F5F8"
+    };
+  });
+}
+
+function mergeReferenceAssetNodes(nodes, referenceAssets) {
+  const existing = Array.isArray(nodes) ? nodes : [];
+  if (!referenceAssets.length) {
+    return existing;
+  }
+  return existing.concat(buildReferenceAssetImageNodes(referenceAssets));
+}
+
+function buildEditableDesignManifest({ prompt, width, height, sourceImage, mode, referenceAssets = [] }) {
   const isTall = height >= width;
   const margin = Math.round(width * 0.07);
   const cardWidth = width - margin * 2;
@@ -991,7 +1384,7 @@ function buildEditableDesignManifest({ prompt, width, height, sourceImage, mode 
       clipsContent: true
     },
     sourceImage,
-    nodes: [
+    nodes: mergeReferenceAssetNodes([
       {
         type: "text",
         name: "screen_title",
@@ -1101,7 +1494,7 @@ function buildEditableDesignManifest({ prompt, width, height, sourceImage, mode 
         shadow: { y: 14, blur: 28, opacity: 0.08 },
         children: buildBottomNavNodes({ cardWidth, bottomHeight, accent })
       }
-    ]
+    ], referenceAssets)
   };
 }
 
@@ -1122,27 +1515,108 @@ function createEditableTemplateCopy(mode) {
   };
 }
 
-function buildEditableDesignManifestPrompt({ prompt, width, height }) {
+function buildEditableDesignAnalysisPrompt({ prompt, width, height, referenceAssets = [], modelReferenceAssets = [] }) {
+  const attachedAssetIds = new Set(modelReferenceAssets.map((asset) => asset.id));
+  const assetLines = referenceAssets.length
+    ? referenceAssets.map((asset, index) => {
+        const p = asset.placement;
+        const attached = attachedAssetIds.has(asset.id) ? "attached" : "metadata-only";
+        return `- reference asset ${index + 1} (${attached}): ${asset.name}, original position x=${p.x}, y=${p.y}, width=${p.width}, height=${p.height}, radius=${asset.radius || 0}`;
+      }).join("\n")
+    : "- No user-sliced reference assets were provided.";
+  return [
+    "你是资深 UI 视觉标注员、移动端设计还原审稿人。",
+    "请只分析输入截图，不要生成代码，不要生成 Figma manifest。",
+    "目标是把截图拆解为一份高精度视觉分析 JSON，供后续程序还原 H5/Figma。不要凭用户提示词重新设计。",
+    "",
+    `画布尺寸：${width} x ${height}`,
+    "输入图片顺序：第 1 张是完整 UI 截图；后续图片是部分用户手动切图样本。完整切图坐标如下：",
+    assetLines,
+    "",
+    "分析原则：",
+    "- 从上到下、从左到右分析，不跳过任何明显区域。",
+    "- 必须记录背景色/背景渐变、卡片颜色、圆角、阴影、间距、文字层级、按钮样式、底部导航。",
+    "- 必须尽量抄录截图中的真实文字；看不清时写 unclear_text，不要使用用户提示词补文案。",
+    "- 用户切图资产必须作为真实 image asset 复用，记录它们附近的文本、卡片和层级关系。",
+    "- 对没有切图的通用线性图标，记录语义 iconName；对彩色图标/头像/IP/商品图，建议使用 image asset。",
+    "- 坐标和尺寸要按截图估算，宁可粗略也不要省略。",
+    "- 输出要紧凑，不要写长篇 notes；每个 notes 不超过 18 个中文字符。",
+    "- regions 最多 35 项，texts 最多 70 项，controls 最多 50 项，assets 最多 40 项。",
+    "",
+    "只输出 JSON 对象，schema：",
+    "{",
+    "  \"version\": \"ui-visual-analysis-0.1\",",
+    "  \"screen\": { \"width\": " + width + ", \"height\": " + height + ", \"background\": \"#RRGGBB or gradient description\", \"styleSummary\": \"视觉风格一句话\" },",
+    "  \"layout\": { \"density\": \"sparse|normal|dense\", \"mainAxis\": \"vertical\", \"safeArea\": { \"top\": 0, \"bottom\": 0 }, \"globalPadding\": 0 },",
+    "  \"regions\": [",
+    "    { \"name\":\"header\", \"role\":\"status/header/banner/card/grid/list/nav\", \"x\":0, \"y\":0, \"width\":100, \"height\":100, \"fill\":\"#RRGGBB\", \"gradient\":\"optional\", \"radius\":0, \"shadow\":\"none|soft|medium\", \"notes\":\"visual details\" }",
+    "  ],",
+    "  \"texts\": [",
+    "    { \"text\":\"真实文字\", \"x\":0, \"y\":0, \"width\":100, \"height\":24, \"fontSize\":16, \"fontWeight\":400, \"color\":\"#RRGGBB\", \"align\":\"left|center|right\", \"region\":\"header\" }",
+    "  ],",
+    "  \"controls\": [",
+    "    { \"kind\":\"button|tab|search|nav-item|badge\", \"text\":\"真实文字或空\", \"x\":0, \"y\":0, \"width\":100, \"height\":40, \"fill\":\"#RRGGBB\", \"radius\":20, \"iconName\":\"optional\", \"region\":\"card\" }",
+    "  ],",
+    "  \"assets\": [",
+    "    { \"assetId\":\"reference asset id or empty\", \"usage\":\"avatar|icon|illustration|logo|photo\", \"x\":0, \"y\":0, \"width\":40, \"height\":40, \"mustUseImage\":true, \"notes\":\"how it appears\" }",
+    "  ],",
+    "  \"missingButImportant\": [\"需要后续还原重点\"]",
+    "}",
+    "",
+    "用户原始提示词只可辅助理解主题，不能用于替换截图真实文案：",
+    prompt || ""
+  ].join("\n");
+}
+
+function buildEditableDesignManifestPrompt({ prompt, width, height, referenceAssets = [], modelReferenceAssets = [], visualAnalysis = null }) {
+  const attachedAssetIds = new Set(modelReferenceAssets.map((asset) => asset.id));
+  const assetLines = referenceAssets.length
+    ? referenceAssets.map((asset, index) => {
+        const p = asset.placement;
+        const attached = attachedAssetIds.has(asset.id) ? "attached" : "metadata-only";
+        return `- reference asset ${index + 1} (${attached}): ${asset.name}, original position x=${p.x}, y=${p.y}, width=${p.width}, height=${p.height}`;
+      }).join("\n")
+    : "- No user-sliced reference assets were provided.";
+  const analysisText = visualAnalysis
+    ? stableJsonStringify(visualAnalysis, 14000)
+    : "No visual analysis JSON was available; infer directly from the screenshot.";
   return [
     "你是资深 UI 截图结构化还原工程师和 Figma 插件节点生成专家。",
     "请基于输入的 UI 截图生成一个可编辑 Figma manifest JSON。输入截图是唯一真实参考，用户原始提示词只能帮助理解页面主题，绝对不能被当成界面文案写入 manifest。",
+    "你会收到一份上一步 AI 视觉分析 JSON。必须优先遵循其中的 regions/texts/controls/assets；如果分析与截图冲突，以截图为准。",
+    "",
+    "AI 视觉分析 JSON：",
+    analysisText,
+    "",
+    "输入图片顺序：第 1 张是完整 UI 截图；后续图片是部分用户切图样本。所有切图的完整位置清单如下，metadata-only 的切图不会作为图片附件传给模型，但后处理仍会按原坐标注入为真实 image 节点。",
+    assetLines,
     "",
     "强约束：",
     "- 只输出 JSON 对象，不要 Markdown，不要解释。",
     "- 不要输出 HTML。",
     "- 不要把用户提示词复制成页面标题、按钮、卡片文案或任何界面文字。",
+    "- 目标是视觉还原截图，不是生成一套新模板；相似度优先于抽象组件完整度。",
     "- 文本节点只能来自截图中清晰可见的真实文字；看不清时用短占位：文本。",
     "- 坐标、尺寸必须在截图画布内，画布尺寸为 " + width + " x " + height + "。",
+    "- 用户切出的 reference assets 是强约束：它们代表真实头像、图标、插画、商品图或复杂视觉元素，必须在还原稿中保留其原始位置、大小和层级关系。",
+    "- 不要把 reference assets 对应的区域重新画成普通矩形或文字；后处理会按原坐标把它们注入为 image 节点，你需要围绕这些真实资产安排附近卡片、文案、按钮和布局。",
+    "- 请按截图从上到下、从左到右逐区还原：状态栏、头部信息、会员/banner、功能宫格、推荐列表、收藏列表、底部导航。不要跳过明显区域。",
     "- 优先还原主要布局、文字层级、卡片、按钮、底部导航、状态栏、搜索框、banner、列表和主要装饰块。",
+    "- 不要生成覆盖内容的大白色空卡片；只有截图中真实存在的卡片才创建 frame/rect，并尽量补齐卡片内可见文字与按钮。",
+    "- 对截图中的重复宫格、功能入口、列表项、底部导航，请用多个独立节点按真实行列位置排布，不要合并成一个空白容器。",
+    "- 通用功能图标不要用 rect 占位，请使用 icon 节点。icon 节点会由插件映射为 Hugeicons 风格 inline SVG。",
+    "- iconName 只能使用这些语义名之一：star, clock, bookmark, download, calendarcheck, cloud, wallet, code, plus, home, play, mic, message, user, search, settings, scan。",
+    "- 如果截图里的图标属于强风格彩色图标、头像、Logo、IP 或插画，应由 reference asset/image 保留，不要用 icon 节点替代。",
     "- 复杂角色、商品图、插画、照片不要硬画，使用 image 类型占位或简化矩形占位。",
-    "- 控制节点数量在 12 到 60 个之间，避免生成大量碎片。",
+    "- 控制节点数量在 24 到 90 个之间；少量关键节点不够，还原度会很低，但也不要生成无意义碎片。",
     "- 所有颜色使用 #RRGGBB。",
     "- 圆角、阴影、透明度要尽量接近截图。",
     "",
     "允许的节点类型：",
     "- frame: 可包含 children，用于卡片、导航、分组。",
-    "- rect: 矩形、背景、按钮、图标占位。",
+    "- rect: 矩形、背景、按钮、卡片、分割线、普通色块。",
     "- text: 真实文本。",
+    "- icon: 通用线性功能图标，字段包括 iconName、color、strokeWidth。",
     "- image: 复杂图片占位，不需要 dataUrl。",
     "",
     "返回 JSON schema：",
@@ -1152,6 +1626,7 @@ function buildEditableDesignManifestPrompt({ prompt, width, height }) {
     "  \"screen\": { \"name\": \"editable_design_ai_reconstruction\", \"width\": " + width + ", \"height\": " + height + ", \"fill\": \"#FFFFFF\", \"clipsContent\": true },",
     "  \"nodes\": [",
     "    { \"type\":\"text\", \"name\":\"title\", \"text\":\"截图中的真实文字\", \"x\":0, \"y\":0, \"width\":100, \"height\":30, \"fontSize\":20, \"fontWeight\":700, \"lineHeight\":26, \"color\":\"#111111\" },",
+    "    { \"type\":\"icon\", \"name\":\"icon_star\", \"iconName\":\"star\", \"x\":0, \"y\":0, \"width\":24, \"height\":24, \"color\":\"#111111\", \"strokeWidth\":2 },",
     "    { \"type\":\"frame\", \"name\":\"card\", \"x\":0, \"y\":0, \"width\":100, \"height\":100, \"radius\":16, \"fill\":\"#FFFFFF\", \"shadow\":{\"y\":8,\"blur\":24,\"opacity\":0.12}, \"children\":[] }",
     "  ]",
     "}",
@@ -1159,6 +1634,286 @@ function buildEditableDesignManifestPrompt({ prompt, width, height }) {
     "用户原始提示词，仅用于理解主题，不得复制到界面文案：",
     prompt || ""
   ].join("\n");
+}
+
+function buildEditableDesignH5Prompt({ prompt, width, height, previewWidth, previewHeight, referenceAssets = [], modelReferenceAssets = [], visualAnalysis = null }) {
+  const attachedAssetIds = new Set(modelReferenceAssets.map((asset) => asset.id));
+  const assetLines = referenceAssets.length
+    ? referenceAssets.map((asset, index) => {
+        const p = asset.placement;
+        const sx = Math.round(p.x * (previewWidth / width));
+        const sy = Math.round(p.y * (previewHeight / height));
+        const sw = Math.round(p.width * (previewWidth / width));
+        const sh = Math.round(p.height * (previewHeight / height));
+        const radius = Math.round((asset.radius || 0) * (previewWidth / width));
+        const attached = attachedAssetIds.has(asset.id) ? "attached image available" : "metadata only";
+        return `- asset ${index + 1}: id=${asset.id}, name=${asset.name}, ${attached}, source x=${p.x}, y=${p.y}, w=${p.width}, h=${p.height}, radius=${asset.radius || 0}; preview x=${sx}, y=${sy}, w=${sw}, h=${sh}, radius=${radius}. REQUIRED ANCHOR HTML: <img data-reference-asset="${asset.id}" src="asset:${asset.id}" style="position:absolute;left:${sx}px;top:${sy}px;width:${sw}px;height:${sh}px;border-radius:${radius}px;object-fit:contain;z-index:900;">. Do not redraw, replace, simplify, recolor, crop, or move it.`;
+      }).join("\n")
+    : "- No user-sliced assets were provided.";
+  const analysisText = visualAnalysis
+    ? stableJsonStringify(visualAnalysis, 18000)
+    : "No visual analysis JSON is available. Infer regions/texts/assets directly from the screenshot.";
+  return [
+    "You are a senior UI screenshot-to-HTML reconstruction engineer and mobile UI tracing specialist.",
+    "Convert the attached UI screenshot into one standalone HTML document for visual inspection and later Figma import.",
+    "This is a pixel-reconstruction task. The goal is not a nicer similar app, but a faithful HTML trace of the provided screenshot.",
+    "Think of this as manually tracing the screenshot on an artboard that matches the source image width, not redesigning an app screen.",
+    "",
+    "Highest priority:",
+    `- The output artboard width MUST be exactly ${previewWidth}px.`,
+    `- The output artboard height MUST be exactly ${previewHeight}px, derived from the original screenshot ${width}x${height}.`,
+    "- Reconstruct the screenshot, do not redesign it, do not improve it, do not simplify it, and do not create a new visual style.",
+    "- Preserve relative position, proportion, visual hierarchy, colors, gradients, shadows, border radii, strokes, spacing, typography, and layer order.",
+    "- Every visible element must be placed by absolute coordinates inside .screen. Do not rely on flex/grid/normal document flow for main layout.",
+    "- Use the screenshot as the coordinate source: status bar, header, cards, icons, tabs, list rows, and bottom navigation must keep their original x/y/width/height relationships.",
+    "- The screenshot is the only source of truth. The user prompt is only theme context and must not be copied as interface text.",
+    "- Do not use the full screenshot as a background image. Build the UI with HTML/CSS shapes, editable text, and provided sliced assets.",
+    "- Every provided sliced asset is mandatory and is a locked visual anchor. Place each one as an <img> inside .screen at its exact preview x/y/width/height.",
+    "- If a sliced asset is an icon, mascot, avatar, decorative badge, product image, or complex graphic, DO NOT redraw it with CSS/SVG and DO NOT replace it with a similar icon. Use the exact asset:<id> image.",
+    "- The injected asset must be visible in the final page. Do not cover it with white cards, text blocks, masks, or gradients.",
+    "- Put sliced assets above their matching card/background but below only text that truly overlays the original image. Do not hide them behind white cards.",
+    "- Do not invent large blank cards. If a region exists, fill it with its visible content.",
+    "- All visible text should be transcribed from the screenshot. If unreadable, use a very short plausible placeholder only where text exists.",
+    "- Use absolute positioning inside a single .screen root. This is for pixel-level comparison, not responsive layout.",
+    "- Text must not reflow differently from the screenshot. Short labels, currency values, dates, tab labels, button labels, nav labels, and list titles should use white-space:nowrap.",
+    "- Multi-line text is allowed only when the screenshot itself clearly shows multiple lines.",
+    "- Currency and numeric values must stay on one line, e.g. ¥268.00 must not become two lines or lose decimals.",
+    "- Do not replace real icons with empty squares, checkboxes, emoji, generic placeholders, or unrelated icon glyphs.",
+    "- If an icon is not provided as a sliced asset, draw a simple inline SVG with matching size, stroke weight, and position.",
+    "- Never use literal arrow characters such as ›, ‹, →, ←, ↓, ↑, >, or < as UI arrows. Draw chevrons, back arrows, refresh arrows, and dropdown arrows as inline SVG shapes so they remain vector icons after Figma import.",
+    "- Avoid oversized text. Match the screenshot's apparent font scale in the source image: header text, card labels, secondary text, badges, and navigation labels must stay visually proportional to the screenshot.",
+    "- Use only inline CSS in a <style> tag. No JavaScript. No external URLs. No web fonts.",
+    "- Use CSS gradients and shadows where the screenshot has them.",
+    "- For complex avatars, colorful icons, mascot IP, product photos, decorative illustrations, and all user-sliced assets, use <img> layers.",
+    "- For generic simple line icons not provided as slices, draw only very simple monochrome inline SVG paths or CSS strokes. Do not create colorful decorative SVG icons, do not redesign icons, and do not use emoji as icons.",
+    "- Do not output any <img> tag unless it is one of the provided asset:<id> references. For unsliced simple icons, use inline <svg>.",
+    "",
+    "Absolute-positioning implementation rules:",
+    "- .screen must be position:relative; each major visual element should be position:absolute.",
+    "- For every card/banner/button/list row, set explicit left/top/width/height/radius/background/box-shadow.",
+    "- For every text element, set explicit left/top/width/height/font-size/font-weight/line-height/color and white-space where appropriate.",
+    "- For every SVG icon, set explicit left/top/width/height and keep it visually close to the screenshot.",
+    "- Do not let line-height, margins, padding, flex wrapping, or browser defaults change the screenshot geometry.",
+    "- Reset h1,h2,h3,p,button margins to 0 in CSS.",
+    "",
+    "Visual analysis JSON from a previous screenshot-reading pass:",
+    analysisText,
+    "",
+    "Provided sliced assets:",
+    assetLines,
+    "",
+    "Reference-asset usage rules:",
+    "- Treat every listed asset as an already-cut real UI element. Its coordinates are authoritative.",
+    "- Create surrounding text, card backgrounds, dividers, buttons, and labels around these assets, but do not synthesize replacement artwork for them.",
+    "- If an asset belongs to a grid item or card, reconstruct the whole grid/card around the fixed asset coordinate.",
+    "- If an asset overlaps a section that the model thinks is blank, the asset wins: keep the asset and reconstruct the nearby UI.",
+    "",
+    "Pixel reconstruction workflow:",
+    "1. Use the visual analysis JSON to create the main screen background and section bounding boxes first.",
+    "2. Place all cards, banners, list rows, nav bars, search boxes, buttons, dividers, and gradients at their approximate screenshot coordinates.",
+    "3. Place all required <img data-reference-asset> anchors at the exact coordinates listed above.",
+    "4. Add visible text from the screenshot, preserving line breaks, font weight, size hierarchy, and color.",
+    "5. Add simple unsliced line icons only where the screenshot has unsliced line icons.",
+    "6. Review for common failures: no empty giant cards, no copied user prompt as UI text, no missing sliced assets, no rearranged grid, no unrelated icon set.",
+    "",
+    "HTML requirements:",
+    "- Return only the complete HTML document, no Markdown fences and no explanation.",
+    "- The document must contain <!doctype html>, <html>, <head>, <meta charset=\"UTF-8\">, <style>, and <body>.",
+    "- Body background may be neutral gray for preview only; the UI itself must be inside .screen.",
+    "- .screen must have width and height exactly as specified and overflow hidden.",
+    "- Asset references must use src=\"asset:<id>\". Do not embed base64 yourself.",
+    "- Asset references should include data-reference-asset=\"<id>\" so the importer can preserve them.",
+    "- Keep CSS readable and grouped by major regions.",
+    "- Prefer border-box sizing.",
+    "",
+    "ScreenCoder-style reasoning checklist to apply silently before writing HTML:",
+    "1. Identify all UI regions from top to bottom.",
+    "2. Estimate the bounding box of every card/list/grid/nav/header/banner.",
+    "3. Transcribe visible text and place it at matching coordinates.",
+    "4. Reuse every provided sliced asset in its exact position. Treat these assets as locked visual anchors.",
+    "5. Recreate gradients/backgrounds before placing foreground content.",
+    "6. Compare mentally against screenshot and adjust obvious spacing/size issues.",
+    "",
+    "User prompt, for topic context only:",
+    prompt || "(empty)"
+  ].join("\n");
+}
+
+function extractHtmlDocument(text) {
+  const raw = String(text || "")
+    .trim()
+    .replace(/^```(?:html)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const fullMatch = raw.match(/<!doctype html[\s\S]*<\/html>/i) || raw.match(/<html[\s\S]*<\/html>/i);
+  if (fullMatch) {
+    const html = fullMatch[0].trim();
+    return /^<!doctype html/i.test(html) ? html : `<!doctype html>\n${html}`;
+  }
+  const bodyMatch = raw.match(/<body[\s\S]*<\/body>/i);
+  if (bodyMatch) {
+    return `<!doctype html><html><head><meta charset="UTF-8"></head>${bodyMatch[0]}</html>`;
+  }
+  return `<!doctype html><html><head><meta charset="UTF-8"></head><body>${raw}</body></html>`;
+}
+
+function sanitizeGeneratedHtml(html, referenceAssets, { previewWidth, previewHeight, sourceWidth, sourceHeight }) {
+  const assetMap = new Map((referenceAssets || []).map((asset) => [asset.id, asset.dataUrl]));
+  let safe = extractHtmlDocument(html)
+    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+    .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<object\b[\s\S]*?<\/object>/gi, "")
+    .replace(/<embed\b[^>]*>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*(['"])[\s\S]*?\1/gi, "")
+    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "")
+    .replace(/javascript:/gi, "");
+
+  safe = safe.replace(/(["'(])asset:([\w\u4e00-\u9fa5-]+)(["')])/g, (match, open, id, close) => {
+    const dataUrl = assetMap.get(id);
+    return dataUrl ? `${open}${dataUrl}${close}` : `${open}${close}`;
+  });
+  safe = safe.replace(/=\s*asset:([\w\u4e00-\u9fa5-]+)/g, (match, id) => {
+    const dataUrl = assetMap.get(id);
+    return dataUrl ? `="${dataUrl}"` : "=\"\"";
+  });
+
+  safe = safe.replace(/\s(?:href|src)\s*=\s*(['"])(?!data:image\/|#)[\s\S]*?\1/gi, (match) => {
+    return /\ssrc\s*=/i.test(match) ? " src=\"\"" : " href=\"#\"";
+  });
+  safe = safe.replace(/\ssrc\s*=\s*(?!["']?data:image\/)([^\s>]+)/gi, " src=\"\"");
+
+  safe = removeGeneratedImageTags(safe);
+
+  safe = injectMissingReferenceAssets(safe, referenceAssets, {
+    previewWidth,
+    sourceWidth,
+    sourceHeight
+  });
+
+  const guardStyle = [
+    "<style data-preview-guard>",
+    "html,body{margin:0;padding:0;background:#eef0f4;}",
+    "body{min-height:100vh;display:flex;justify-content:center;align-items:flex-start;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Arial,\"PingFang SC\",\"Microsoft YaHei\",sans-serif;}",
+    "*{box-sizing:border-box;}",
+    `.screen{width:${previewWidth}px!important;height:${previewHeight}px!important;max-width:none;overflow:hidden;position:relative;}`,
+    "img{display:block;}",
+    ".screen [data-reference-asset]{position:absolute!important;object-fit:contain!important;object-position:center!important;background:transparent!important;z-index:999!important;pointer-events:none!important;}",
+    "</style>"
+  ].join("");
+
+  if (/<head\b[^>]*>/i.test(safe)) {
+    safe = safe.replace(/<head\b([^>]*)>/i, `<head$1><meta charset="UTF-8">${guardStyle}`);
+  } else {
+    safe = safe.replace(/<html\b([^>]*)>/i, `<html$1><head><meta charset="UTF-8">${guardStyle}</head>`);
+  }
+  if (!/<body\b/i.test(safe)) {
+    safe = safe.replace(/<\/head>/i, "</head><body>");
+    safe = safe.replace(/<\/html>/i, "</body></html>");
+  }
+  return safe;
+}
+
+function removeGeneratedImageTags(html) {
+  return String(html || "").replace(/<img\b[^>]*>/gi, "");
+}
+
+function injectMissingReferenceAssets(html, referenceAssets = [], { previewWidth, sourceWidth }) {
+  if (!referenceAssets.length || !previewWidth || !sourceWidth) {
+    return html;
+  }
+  const scale = previewWidth / sourceWidth;
+  const injected = [];
+  let nextHtml = html;
+  for (const asset of referenceAssets) {
+    if (!asset || !asset.dataUrl || !asset.placement) {
+      continue;
+    }
+    const escapedId = escapeRegExp(String(asset.id || ""));
+    if (escapedId) {
+      const existingAssetImage = new RegExp(`<img\\b(?=[^>]*\\bdata-reference-asset=(["'])${escapedId}\\1)[^>]*>`, "gi");
+      nextHtml = nextHtml.replace(existingAssetImage, "");
+    }
+    const p = asset.placement;
+    const left = Math.round(Number(p.x || 0) * scale);
+    const top = Math.round(Number(p.y || 0) * scale);
+    const width = Math.max(1, Math.round(Number(p.width || 1) * scale));
+    const height = Math.max(1, Math.round(Number(p.height || 1) * scale));
+    const radius = Math.round(Number(asset.radius || 0) * scale);
+    injected.push(
+      `<img src="${asset.dataUrl}" alt="${escapeHtmlAttribute(asset.name || asset.id || "reference_asset")}" data-reference-asset="${escapeHtmlAttribute(asset.id || "")}" style="position:absolute!important;left:${left}px!important;top:${top}px!important;width:${width}px!important;height:${height}px!important;border-radius:${radius}px!important;object-fit:contain!important;object-position:center!important;background:transparent!important;z-index:999!important;pointer-events:none!important;" />`
+    );
+  }
+  if (!injected.length) {
+    return nextHtml;
+  }
+  const payload = `\n${injected.join("\n")}\n`;
+  const screenOpen = /(<[^>]+class=(["'])[^"']*\bscreen\b[^"']*\2[^>]*>)/i;
+  if (screenOpen.test(nextHtml)) {
+    return nextHtml.replace(screenOpen, `$1${payload}`);
+  }
+  if (/<body\b[^>]*>/i.test(nextHtml)) {
+    return nextHtml.replace(/<body\b([^>]*)>/i, `<body$1>${payload}`);
+  }
+  return `${payload}${nextHtml}`;
+}
+
+function buildFallbackH5PreviewHtml({ prompt, width, height, previewWidth, previewHeight, imageDataUrl, referenceAssets = [] }) {
+  const scale = previewWidth / width;
+  const assetHtml = referenceAssets.slice(0, 16).map((asset) => {
+    const p = asset.placement;
+    return `<img class="slice-asset" src="${escapeHtmlAttribute(asset.dataUrl)}" alt="${escapeHtmlAttribute(asset.name)}" style="left:${Math.round(p.x * scale)}px;top:${Math.round(p.y * scale)}px;width:${Math.round(p.width * scale)}px;height:${Math.round(p.height * scale)}px;border-radius:${Math.round((asset.radius || 0) * scale)}px;">`;
+  }).join("");
+  return [
+    "<!doctype html>",
+    "<html>",
+    "<head>",
+    "<meta charset=\"UTF-8\">",
+    "<style>",
+    "html,body{margin:0;padding:0;background:#eef0f4;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Arial,\"PingFang SC\",\"Microsoft YaHei\",sans-serif;}",
+    "body{min-height:100vh;display:flex;justify-content:center;align-items:flex-start;}",
+    "*{box-sizing:border-box;}",
+    `.screen{position:relative;width:${previewWidth}px;height:${previewHeight}px;overflow:hidden;background:#f7f8fb;box-shadow:0 18px 60px rgba(20,24,36,.16);}`,
+    ".source{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:.2;}",
+    ".hint{position:absolute;left:32px;top:32px;right:32px;padding:22px;border-radius:24px;background:rgba(255,255,255,.86);box-shadow:0 18px 50px rgba(20,24,36,.12);}",
+    ".hint strong{display:block;color:#151821;font-size:28px;line-height:1.2;}",
+    ".hint span{display:block;margin-top:8px;color:#7a8190;font-size:15px;line-height:1.5;}",
+    ".slice-asset{position:absolute;object-fit:contain;border-radius:8px;}",
+    "</style>",
+    "</head>",
+    "<body>",
+    "<main class=\"screen\">",
+    imageDataUrl ? `<img class="source" src="${escapeHtmlAttribute(imageDataUrl)}" alt="">` : "",
+    "<section class=\"hint\">",
+    "<strong>H5 预览模板</strong>",
+    `<span>AI 还原不可用时显示。原图尺寸 ${width} × ${height}，预览宽度 ${previewWidth}px。${escapeHtml(prompt || "")}</span>`,
+    "</section>",
+    assetHtml,
+    "</main>",
+    "</body>",
+    "</html>"
+  ].join("");
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeHtmlAttribute(value) {
+  return escapeHtml(value).replace(/`/g, "&#96;");
+}
+
+function numericTextLooksLikeMetric(text) {
+  const value = String(text || "").trim();
+  return !!value && /^[¥￥$€£+\-−–—.,:/%()\s0-9]+$/.test(value) && /\d/.test(value);
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function extractEditableDesignManifestJson(text) {
@@ -1179,7 +1934,7 @@ function extractEditableDesignManifestJson(text) {
   }
 }
 
-function sanitizeEditableDesignManifest(manifest, { width, height, sourceImage }) {
+function sanitizeEditableDesignManifest(manifest, { width, height, sourceImage, referenceAssets = [] }) {
   if (!manifest || typeof manifest !== "object" || !Array.isArray(manifest.nodes)) {
     throw new Error("manifest 缺少 nodes 数组");
   }
@@ -1195,7 +1950,10 @@ function sanitizeEditableDesignManifest(manifest, { width, height, sourceImage }
       clipsContent: screen.clipsContent !== false
     },
     sourceImage,
-    nodes: sanitizeEditableNodes(manifest.nodes, { width, height, depth: 0 }).slice(0, 80)
+    nodes: mergeReferenceAssetNodes(
+      sanitizeEditableNodes(manifest.nodes, { width, height, depth: 0 }).slice(0, 80),
+      referenceAssets
+    )
   };
   if (!sanitized.nodes.length) {
     throw new Error("manifest 没有可用节点");
@@ -1218,7 +1976,7 @@ function sanitizeEditableNode(node, context) {
   if (!node || typeof node !== "object") {
     return null;
   }
-  const allowedTypes = new Set(["frame", "rect", "text", "image"]);
+  const allowedTypes = new Set(["frame", "rect", "text", "image", "icon"]);
   const type = allowedTypes.has(String(node.type || "").toLowerCase()) ? String(node.type).toLowerCase() : "rect";
   const x = clampNumber(node.x || 0, 0, context.width);
   const y = clampNumber(node.y || 0, 0, context.height);
@@ -1239,6 +1997,13 @@ function sanitizeEditableNode(node, context) {
     sanitized.fontWeight = Math.round(clampNumber(node.fontWeight || 500, 300, 900));
     sanitized.lineHeight = Math.round(clampNumber(node.lineHeight || sanitized.fontSize * 1.25, sanitized.fontSize, 140));
     sanitized.color = normalizeHexColor(node.color, "#111318");
+    return sanitized;
+  }
+
+  if (type === "icon") {
+    sanitized.iconName = normalizeEditableIconName(node.iconName || node.name);
+    sanitized.color = normalizeHexColor(node.color || node.stroke, "#111318");
+    sanitized.strokeWidth = clampNumber(node.strokeWidth || 2, 1, 5);
     return sanitized;
   }
 
@@ -1267,6 +2032,9 @@ function sanitizeEditableNode(node, context) {
       depth: context.depth + 1
     });
   }
+  if (type === "image" && /^data:image\/(?:png|jpeg|jpg);base64,/i.test(String(node.dataUrl || ""))) {
+    sanitized.dataUrl = node.dataUrl;
+  }
   return sanitized;
 }
 
@@ -1281,6 +2049,50 @@ function normalizeHexColor(value, fallback) {
   return fallback;
 }
 
+function normalizeEditableIconName(value) {
+  const text = String(value || "").toLowerCase().replace(/[\s_-]+/g, "");
+  const aliases = {
+    favourite: "star",
+    favorite: "star",
+    collect: "star",
+    collection: "star",
+    history: "clock",
+    recent: "clock",
+    bookshelf: "bookmark",
+    book: "bookmark",
+    download: "download",
+    filedownload: "download",
+    file: "download",
+    order: "calendarcheck",
+    orders: "calendarcheck",
+    task: "calendarcheck",
+    cloud: "cloud",
+    drive: "cloud",
+    netdisk: "cloud",
+    wallet: "wallet",
+    money: "wallet",
+    miniapp: "code",
+    miniprogram: "code",
+    more: "plus",
+    add: "plus",
+    home: "home",
+    video: "play",
+    play: "play",
+    microphone: "mic",
+    mic: "mic",
+    message: "message",
+    chat: "message",
+    user: "user",
+    profile: "user",
+    search: "search",
+    settings: "settings",
+    scan: "scan"
+  };
+  const allowed = new Set(["star", "clock", "bookmark", "download", "calendarcheck", "cloud", "wallet", "code", "plus", "home", "play", "mic", "message", "user", "search", "settings", "scan"]);
+  const normalized = aliases[text] || text;
+  return allowed.has(normalized) ? normalized : "plus";
+}
+
 function safeNodeName(value) {
   return String(value || "node")
     .replace(/[^\w\u4e00-\u9fa5-]+/g, "_")
@@ -1288,27 +2100,51 @@ function safeNodeName(value) {
 }
 
 function buildHtmlPreviewFromEditableManifest(manifest) {
-  const nodes = [];
-  const walk = (node) => {
+  const renderNode = (node) => {
     if (!node) {
-      return;
+      return "";
     }
+    const commonStyle = [
+      "position:absolute",
+      "box-sizing:border-box",
+      `left:${node.x || 0}px`,
+      `top:${node.y || 0}px`,
+      `width:${node.width || 1}px`,
+      `height:${node.height || 1}px`,
+      node.opacity === undefined ? "" : `opacity:${node.opacity}`
+    ].filter(Boolean).join(";");
     if (node.type === "text") {
-      nodes.push(`<div class="node text" style="left:${node.x}px;top:${node.y}px;width:${node.width}px;height:${node.height}px;font-size:${node.fontSize}px;line-height:${node.lineHeight}px;font-weight:${node.fontWeight};color:${node.color};">${escapeHtml(node.text)}</div>`);
-      return;
+      const numericAttr = numericTextLooksLikeMetric(node.text) ? ' data-numeric="true"' : "";
+      return `<div class="node text"${numericAttr} style="${commonStyle};font-size:${node.fontSize}px;line-height:${node.lineHeight}px;font-weight:${node.fontWeight};color:${node.color};">${escapeHtml(node.text)}</div>`;
     }
-    nodes.push(`<div class="node box" style="left:${node.x}px;top:${node.y}px;width:${node.width}px;height:${node.height}px;border-radius:${node.radius || 0}px;background:${node.fill || "#fff"};"></div>`);
-    (node.children || []).forEach(walk);
+    if (node.type === "image" && node.dataUrl) {
+      return `<img class="node image" src="${node.dataUrl}" alt="${escapeHtml(node.name || "image")}" style="${commonStyle};border-radius:${node.radius || 0}px;object-fit:contain;" />`;
+    }
+    if (node.type === "icon") {
+      return `<div class="node icon" style="${commonStyle};color:${node.color || "#111318"};">${buildPreviewIconSvg(node)}</div>`;
+    }
+    const shadow = node.shadow
+      ? `box-shadow:${node.shadow.x || 0}px ${node.shadow.y || 8}px ${node.shadow.blur || 24}px rgba(20,24,36,${node.shadow.opacity === undefined ? 0.1 : node.shadow.opacity});`
+      : "";
+    const border = node.stroke ? `border:${node.strokeWidth || 1}px solid ${node.stroke};` : "";
+    const children = (node.children || []).map(renderNode).join("");
+    return `<div class="node box" style="${commonStyle};border-radius:${node.radius || 0}px;background:${node.fill || "#fff"};${shadow}${border}">${children}</div>`;
   };
-  (manifest.nodes || []).forEach(walk);
+  const nodes = (manifest.nodes || []).map(renderNode).join("");
   return [
     "<!doctype html><html><head><meta charset=\"utf-8\" />",
-    `<style>body{margin:0;background:${manifest.screen.fill};font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.screen{position:relative;width:${manifest.screen.width}px;height:${manifest.screen.height}px;overflow:hidden}.node{position:absolute;box-sizing:border-box}.text{white-space:pre-wrap}.box{box-shadow:0 8px 24px rgba(20,24,36,.08)}</style>`,
+    `<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#e8e8e8;font-family:'PingFang SC',-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',Inter,sans-serif}.screen{position:relative;width:${manifest.screen.width}px;height:${manifest.screen.height}px;overflow:hidden;background:${manifest.screen.fill};box-shadow:0 18px 60px rgba(20,24,36,.16)}.node{position:absolute;box-sizing:border-box}.text{white-space:pre-wrap}.text[data-numeric="true"]{font-family:'DIN Alternate','DIN Condensed','DIN 2014','D-DIN','PingFang SC',sans-serif}.image{display:block}.icon svg{display:block;width:100%;height:100%}</style>`,
     "</head><body>",
     "<main class=\"screen\">",
-    nodes.join(""),
+    nodes,
     "</main></body></html>"
   ].join("");
+}
+
+function buildPreviewIconSvg(node) {
+  const stroke = normalizeHexColor(node.color, "#111318");
+  const strokeWidth = clampNumber(node.strokeWidth || 2, 1, 5);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><g stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7.8"/><path d="M12 8.3v7.4M8.3 12h7.4"/></g></svg>`;
 }
 
 function buildMetricCardNodes({ margin, width, cardWidth, metricY, accent }) {
@@ -1422,7 +2258,7 @@ function buildFallbackEditableDesignHtml({ prompt, width, height }) {
     `<meta name=\"viewport\" content=\"width=${width}, initial-scale=1\" />`,
     "<style>",
     ":root{--bg:#F6F8FB;--text:#171A22;--muted:#6D7280;--card:#FFFFFF;--accent:" + accent.main + ";--soft:" + accent.soft + ";}",
-    "*{box-sizing:border-box}body{margin:0;width:" + width + "px;height:" + height + "px;background:var(--bg);font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--text);}",
+    "*{box-sizing:border-box}body{margin:0;width:" + width + "px;height:" + height + "px;background:var(--bg);font-family:'PingFang SC',-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',Inter,sans-serif;color:var(--text);} .num{font-family:'DIN Alternate','DIN Condensed','DIN 2014','D-DIN','PingFang SC',sans-serif;}",
     ".screen{position:relative;width:100%;height:100%;padding:7%;overflow:hidden}.title{font-size:32px;font-weight:800;line-height:1.1}.hero{margin-top:44px;border-radius:28px;background:var(--soft);padding:28px;box-shadow:0 18px 36px rgba(20,24,36,.10)}.hero h2{margin:0 0 10px;font-size:26px}.hero p{margin:0;color:var(--muted)}.button{display:inline-flex;margin-top:18px;padding:10px 18px;border-radius:999px;background:var(--accent);color:white;font-weight:700}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}.metric{border-radius:18px;background:var(--card);padding:16px;box-shadow:0 10px 24px rgba(20,24,36,.07)}.nav{position:absolute;left:7%;right:7%;bottom:3%;height:72px;border-radius:28px;background:#fff;display:grid;grid-template-columns:repeat(4,1fr);place-items:center;box-shadow:0 14px 28px rgba(20,24,36,.08)}",
     "</style>",
     "</head>",

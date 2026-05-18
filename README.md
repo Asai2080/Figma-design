@@ -43,6 +43,7 @@ AI UI Asset Generator 是一个运行在 Figma 内的 AI UI 设计稿生成与�
 更完整的使用流程、功能说明和常见问题见：
 
 - [使用说明与功能说明](docs/使用说明与功能说明.md)
+- [2.0 更新说明](docs/2.0-update.md)
 - [2.0 Roadmap](docs/v2-roadmap.md)
 
 1. 安装依赖：
