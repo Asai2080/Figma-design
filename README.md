@@ -32,13 +32,34 @@ AI UI Asset Generator 是一个运行在 Figma 内的 AI UI 设计稿生成与�
 ├── server.js          # 本地 API 代理，负责调用图像模型
 ├── figma-sim.html     # 本地浏览器模拟 Figma 插件环境
 ├── package.json       # 本地启动脚本
+├── 一键部署环境.command # Mac 用户双击启动本地环境
+├── 一键部署环境.bat     # Windows 用户双击启动本地环境
 ├── .env.example       # 环境变量示例
 └── docs/              # 产品规划和阶段计划
 ```
 
 ## 新手快速开始
 
-如果你只是想把插件跑起来，记住这两条就够了：
+如果你不熟悉终端，优先使用资源包里的“一键部署环境”文件：
+
+- Mac：双击 `一键部署环境.command`
+- Windows：双击 `一键部署环境.bat`
+
+它会自动完成：
+
+- 检查 Node.js 是否可用
+- 安装或检查项目依赖
+- 启动本地 API 服务
+
+看到下面这句，就说明本地后端启动成功：
+
+```text
+OpenAI image proxy listening on http://127.0.0.1:18787
+```
+
+重要：使用 Figma 插件期间，不要关闭这个窗口。
+
+如果你熟悉终端，也可以直接运行这两条：
 
 ```bash
 npm install
@@ -64,7 +85,7 @@ up to date
 
 只要最后没有红色 `error` 报错，并且项目文件夹里出现 `node_modules` 文件夹，就说明安装成功。
 
-看到下面这句，就说明本地后端启动成功：
+运行 `npm run api` 后，看到下面这句，就说明本地后端启动成功：
 
 ```text
 OpenAI image proxy listening on http://127.0.0.1:18787
