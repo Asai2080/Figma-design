@@ -47,9 +47,33 @@ AI UI Asset Generator 是一个运行在 Figma 内的 AI UI 设计稿生成与�
 
 它会自动完成：
 
-- 检查 Node.js 是否可用
+- 检查 Node.js 是否可用，以及版本是否为 20 或更高
+- 如果没有 Node.js，会提示你下载，并自动打开 Node.js 官网
+- 提示你用 `node -v` 和 `npm -v` 验证安装是否成功
 - 安装或检查项目依赖
 - 启动本地 API 服务
+
+如果你双击后看到“未检测到 Node.js”或“Node.js 版本过低”，请先安装 Node.js：
+
+```text
+https://nodejs.org/
+```
+
+安装完成后，重新打开终端，输入：
+
+```bash
+node -v
+npm -v
+```
+
+如果能看到类似下面的版本号，就说明 Node.js 和 npm 已经装好了：
+
+```text
+v20.x.x
+10.x.x
+```
+
+然后重新双击“一键部署环境”文件即可。
 
 看到下面这句，就说明本地后端启动成功：
 
@@ -109,9 +133,11 @@ OpenAI image proxy listening on http://127.0.0.1:18787
 
 ```bash
 node -v
+npm -v
 ```
 
-如果能看到类似 `v20.x.x`、`v22.x.x`、`v24.x.x` 的版本号，就可以继续。
+如果 `node -v` 能看到类似 `v20.x.x`、`v22.x.x`、`v24.x.x` 的版本号，并且 `npm -v` 也能看到版本号，就可以继续。  
+如果提示 `command not found: npm`，说明 Node.js 没装好，请先去 [Node.js 官网](https://nodejs.org/) 下载并安装。
 
 更完整的使用流程、功能说明和常见问题见：
 
