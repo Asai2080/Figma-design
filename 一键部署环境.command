@@ -11,18 +11,37 @@ echo
 
 if ! command -v node >/dev/null 2>&1; then
   echo "未检测到 Node.js。"
-  echo "请先安装 Node.js 20 或更高版本，然后重新双击本文件。"
+  echo "本插件需要先安装 Node.js 20 或更高版本。"
   echo "下载地址：https://nodejs.org/"
   echo
+  echo "我会帮你打开 Node.js 下载页面。"
+  echo "安装完成后，请重新打开终端，输入下面两条命令验证："
+  echo
+  echo "node -v"
+  echo "npm -v"
+  echo
+  echo "如果能看到 v20.x.x、v22.x.x 这类版本号，就说明安装好了。"
+  echo "然后重新双击本文件。"
+  echo
+  open "https://nodejs.org/" >/dev/null 2>&1 || true
   read -r -p "按回车键退出..."
   exit 1
 fi
 
 if ! command -v npm >/dev/null 2>&1; then
   echo "未检测到 npm。"
+  echo "npm 通常会随 Node.js 一起安装。"
   echo "请重新安装 Node.js 20 或更高版本，然后重新双击本文件。"
   echo "下载地址：https://nodejs.org/"
   echo
+  echo "安装完成后，请重新打开终端，输入下面两条命令验证："
+  echo
+  echo "node -v"
+  echo "npm -v"
+  echo
+  echo "如果两条命令都能看到版本号，就说明安装好了。"
+  echo
+  open "https://nodejs.org/" >/dev/null 2>&1 || true
   read -r -p "按回车键退出..."
   exit 1
 fi
@@ -34,11 +53,20 @@ if [ "$NODE_MAJOR" -lt 20 ]; then
   echo "请升级到 Node.js 20 或更高版本，然后重新双击本文件。"
   echo "下载地址：https://nodejs.org/"
   echo
+  echo "升级完成后，请重新打开终端，输入下面两条命令验证："
+  echo
+  echo "node -v"
+  echo "npm -v"
+  echo
+  echo "如果 node -v 显示 v20.x.x 或更高版本，就说明可以继续。"
+  echo
+  open "https://nodejs.org/" >/dev/null 2>&1 || true
   read -r -p "按回车键退出..."
   exit 1
 fi
 
 echo "Node.js 版本：$(node -v)"
+echo "npm 版本：$(npm -v)"
 echo
 echo "正在安装或检查项目依赖..."
 echo
