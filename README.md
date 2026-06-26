@@ -13,7 +13,7 @@ AI UI Asset Generator 是一个运行在 Figma 内的 AI UI 设计稿生成与�
 - 透明 PNG：支持将切出的资产处理为透明底图片
 - 坐标保留：切图资产保留原图中的位置和尺寸
 - 放入 Figma：自动创建画布，并把设计稿与切图资产导入 Figma
-- 多供应商配置：支持第三方接口、OpenAI 官方 API、OpenRouter
+- 多供应商配置：支持第三方接口、OpenAI 官方等供应商
 
 ## 适用场景
 
@@ -32,13 +32,86 @@ AI UI Asset Generator 是一个运行在 Figma 内的 AI UI 设计稿生成与�
 ├── server.js          # 本地 API 代理，负责调用图像模型
 ├── figma-sim.html     # 本地浏览器模拟 Figma 插件环境
 ├── package.json       # 本地启动脚本
+├── 一键部署环境.command # Mac 用户双击启动本地环境
+├── 一键部署环境.bat     # Windows 用户双击启动本地环境
 ├── .env.example       # 环境变量示例
 └── docs/              # 产品规划和阶段计划
 ```
 
-## 本地运行
+## 新手快速开始
 
-需要 Node.js 20+。
+如果你不熟悉终端，优先使用资源包里的“一键部署环境”文件：
+
+- Mac：双击 `一键部署环境.command`
+- Windows：双击 `一键部署环境.bat`
+
+它会自动完成：
+
+- 检查 Node.js 是否可用
+- 安装或检查项目依赖
+- 启动本地 API 服务
+
+看到下面这句，就说明本地后端启动成功：
+
+```text
+OpenAI image proxy listening on http://127.0.0.1:18787
+```
+
+重要：使用 Figma 插件期间，不要关闭这个窗口。
+
+如果你熟悉终端，也可以直接运行这两条：
+
+```bash
+npm install
+npm run api
+```
+
+区别是：
+
+- `npm install`：只需要第一次安装项目时运行一次。
+- `npm run api`：每次使用 Figma 插件前都要运行，并且这个终端窗口不要关。
+
+`npm install` 安装成功时，通常会看到类似下面的结果：
+
+```text
+added ... packages
+```
+
+或者：
+
+```text
+up to date
+```
+
+只要最后没有红色 `error` 报错，并且项目文件夹里出现 `node_modules` 文件夹，就说明安装成功。
+
+运行 `npm run api` 后，看到下面这句，就说明本地后端启动成功：
+
+```text
+OpenAI image proxy listening on http://127.0.0.1:18787
+```
+
+然后再去 Figma 里打开插件使用。
+
+如果你不熟悉终端，可以继续按下面的详细步骤操作。
+
+### 先准备这些东西
+
+- 一台已经安装 Figma Desktop 的电脑
+- Node.js 20 或更高版本
+- 一个可用的图片生成模型 API Key
+  - 可以是 OpenAI 官方
+  - 可以是火山引擎
+  - 可以是 AI Studio
+  - 也可以是兼容 OpenAI 图片接口的第三方供应商
+
+不知道有没有安装 Node.js，可以打开终端输入：
+
+```bash
+node -v
+```
+
+如果能看到类似 `v20.x.x`、`v22.x.x`、`v24.x.x` 的版本号，就可以继续。
 
 更完整的使用流程、功能说明和常见问题见：
 
@@ -46,71 +119,261 @@ AI UI Asset Generator 是一个运行在 Figma 内的 AI UI 设计稿生成与�
 - [2.0 更新说明](docs/2.0-update.md)
 - [2.0 Roadmap](docs/v2-roadmap.md)
 
-1. 安装依赖：
+### 第 1 步：打开项目目录
+
+先打开终端，并进入这个项目文件夹。
+
+Mac 打开终端：
+
+- 打开 `访达`
+- 进入 `应用程序`
+- 打开 `实用工具`
+- 双击 `终端`
+
+Windows 打开终端：
+
+- 在项目文件夹空白处点击鼠标右键
+- 选择 `在终端中打开` 或 `Open in Terminal`
+
+如果你已经打开了终端，但还没进入项目目录，可以输入 `cd` 加项目路径。
+
+例如 Mac：
+
+```bash
+cd /path/to/AI-UI-Asset-Generator
+```
+
+例如 Windows：
+
+```powershell
+cd C:\path\to\AI-UI-Asset-Generator
+```
+
+进入后输入下面命令确认位置。
+
+Mac 输入：
+
+```bash
+pwd
+```
+
+Windows 输入：
+
+```powershell
+echo %cd%
+```
+
+如果返回的是你的项目文件夹路径，就说明位置对了。
+
+你也可以继续输入下面命令确认项目文件是否存在。
+
+Mac 输入：
+
+```bash
+ls
+```
+
+Windows 输入：
+
+```powershell
+dir
+```
+
+如果返回结果里能看到 `package.json`、`server.js`、`manifest.json`，说明目录正确。
+
+### 第 2 步：安装依赖
+
+只需要第一次运行项目时执行一次：
+
+Mac 输入：
 
 ```bash
 npm install
 ```
 
-2. 配置环境变量：
+Windows 输入：
 
-```bash
-cp .env.example .env
+```powershell
+npm install
 ```
 
-然后在 `.env` 或插件配置面板里填入你的供应商地址、模型和 API Key。
+如果安装成功，终端最后通常会看到类似下面内容：
 
-注意：`.env` 和 `.local-provider-config.json` 已加入 `.gitignore`，不要把真实 API Key 提交到仓库。
+```text
+added ... packages
+```
 
-3. 启动本地 API 代理：
+或者：
+
+```text
+up to date
+```
+
+只要最后没有红色 `error` 报错，并且项目目录里出现 `node_modules` 文件夹，就说明依赖安装成功。
+
+如果提示 `npm: command not found` 或 `npm 不是内部或外部命令`，说明电脑还没安装 Node.js，需要先安装 Node.js 20 或更高版本。
+
+### 第 3 步：启动本地 API
+
+插件不能直接在 Figma 里调用 AI 接口，所以需要先启动一个本地 API 服务。
+
+Mac 输入：
 
 ```bash
 npm run api
 ```
 
-后端默认运行在：
+Windows 输入：
+
+```powershell
+npm run api
+```
+
+看到类似下面内容，说明后端启动成功：
 
 ```text
-http://127.0.0.1:18787
+OpenAI image proxy listening on http://127.0.0.1:18787
 ```
 
-健康检查：
+重要：这个终端窗口不要关。  
+只要你在用插件生成图片，这个窗口就要保持运行。
+
+如果后面插件提示“本地后端未启动或无法连接”，一般就是这个终端窗口被关掉了，重新运行 `npm run api` 即可。
+
+### 第 4 步：在 Figma 里加载插件
+
+1. 打开 Figma Desktop。
+2. 点击顶部菜单 `Plugins`。
+3. 选择 `Development`。
+4. 点击 `Import plugin from manifest...`。
+5. 选择本项目里的 `manifest.json`。
+6. 运行 `AI UI Asset Generator`。
+
+加载成功后，你会看到插件面板。
+
+### 第 5 步：配置供应商和 API Key
+
+在插件设置面板里选择一个供应商：
+
+- **第三方**：推荐给大多数用户。填写供应商的 Base URL、模型名和 API Key。
+- **官方 OpenAI**：填写 OpenAI 官方 API Key 和模型名。
+- **火山引擎**：填写火山引擎 API Key 和模型名。
+- **AI Studio**：填写 AI Studio API Key 和模型名。
+
+配置完成后先点“测试连接”或保存配置。  
+确认成功后，再回到生图页面生成设计稿。
+
+注意：真实 API Key 只保存在本地，不要提交到 GitHub。
+
+项目已经默认忽略这些本地配置文件：
+
+- `.env`
+- `.env.local`
+- `.local-provider-config.json`
+
+### 第 6 步：确认环境已经配置成功
+
+你可以按下面 3 个结果判断环境是否配置好了：
+
+1. **终端里看到本地 API 地址**
+
+   Mac 输入：
+
+   ```bash
+   npm run api
+   ```
+
+   Windows 输入：
+
+   ```powershell
+   npm run api
+   ```
+
+   如果终端返回类似下面内容，就是正确的：
+
+   ```text
+   OpenAI image proxy listening on http://127.0.0.1:18787
+   ```
+
+   这说明本地后端已经启动。这个终端窗口不要关。
+
+2. **插件设置里测试连接成功**
+
+   在 Figma 插件的设置面板里填好供应商、模型名和 API Key 后，点击“测试连接”。
+
+   如果插件提示“连接成功”或类似成功提示，就是正确的。
+
+   如果提示模型不可用、API Key 错误、连接失败，通常是供应商地址、模型名或 API Key 填错了。
+
+3. **能生成一张图**
+
+   回到“文生图”页面，输入一句简单提示词，例如：
+
+   ```text
+   生成一个蓝色风格的手机 App 首页
+   ```
+
+   选择 1 张图，点击生成。  
+   如果插件里出现生成结果图，就是正确的，说明环境已经完整跑通。
+
+如果第 1 步成功，但第 2、3 步失败，通常是 API Key、模型名或供应商地址填错了。  
+如果第 1 步失败，通常是本地后端没有启动，或者终端窗口被关闭了。
+
+## 常见问题
+
+### 插件提示“本地后端未启动或无法连接”
+
+通常是因为没有运行：
 
 ```bash
-curl http://127.0.0.1:18787/health
+npm run api
 ```
 
-4. 启动本地预览：
+或者运行后把终端窗口关掉了。
 
-```bash
-npm run preview
-```
+解决方法：
 
-打开：
+1. 打开终端。
+2. 进入项目目录。
+3. 重新执行 `npm run api`。
+4. 回到 Figma 插件里重新操作。
+
+### 生成失败，提示模型不可用
+
+如果看到类似：
 
 ```text
-http://127.0.0.1:4173/figma-sim.html
+No available channel for model ...
 ```
 
-也可以直接在 Figma Desktop 中导入 `manifest.json` 运行插件。
+说明当前供应商不支持你填写的模型名，或者这个 API Key 没有该模型权限。
 
-## 在 Figma 中加载
+解决方法：
 
-1. 打开 Figma Desktop
-2. 进入 `Plugins > Development > Import plugin from manifest...`
-3. 选择本目录的 `manifest.json`
-4. 运行 `AI UI Asset Generator`
-5. 在设置面板里配置供应商和 API Key
-6. 生成设计稿，选择满意结果后进入切图模式
-7. 框选需要的 UI 元素，点击 `放入 Figma`
+- 回到插件设置。
+- 确认供应商选对了。
+- 把模型名改成供应商实际支持的图片生成模型。
+- 保存后重新生成。
+
+### `npm install` 失败
+
+常见原因是 Node.js 版本过低或网络问题。
+
+建议先检查：
+
+```bash
+node -v
+```
+
+如果版本低于 20，请先升级 Node.js。
 
 ## 供应商配置
 
-插件目前支持三类供应商：
+插件支持在设置面板中配置可用供应商。常见配置包括：
 
-- 第三方：默认模型 `gpt-image-2-all`
-- 官方 OpenAI：默认模型 `gpt-image-2`
-- OpenRouter：固定模型 `gpt-5.4-image-2`
+- 第三方：用户自己填写 Base URL、模型名和 API Key
+- 官方 OpenAI
+- 其他项目已接入或后续接入的供应商
 
 前端会请求本地代理：
 
@@ -118,7 +381,7 @@ http://127.0.0.1:4173/figma-sim.html
 http://127.0.0.1:18787
 ```
 
-如果出现 `Failed to fetch`，通常表示本地 API 代理没有启动，请先运行：
+如果出现 `Failed to fetch`，通常表示本地 API 没启动，请先运行：
 
 ```bash
 npm run api
