@@ -3,7 +3,12 @@ const MIN_UI_WINDOW = { width: 360, height: 240 };
 const COLLAPSED_UI_WINDOW = { width: 320, height: 72 };
 const UI_WINDOW_STORAGE_KEY = "ai-ui-window-state-v2";
 
-figma.showUI(__html__, { width: DEFAULT_UI_WINDOW.width, height: DEFAULT_UI_WINDOW.height, themeColors: true });
+figma.showUI(__html__, {
+  width: DEFAULT_UI_WINDOW.width,
+  height: DEFAULT_UI_WINDOW.height,
+  title: "AI Image Generator",
+  themeColors: true
+});
 
 restoreUiWindowState().catch((error) => {
   notifyRecoverableError("窗口状态恢复失败", error);
